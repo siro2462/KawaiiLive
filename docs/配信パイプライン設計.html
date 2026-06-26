@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>KawaiiLive 配信パイプライン設計</title>
+<style>
+  :root { color-scheme: dark; font-family: "Segoe UI","Yu Gothic UI",system-ui,sans-serif; --bg:#0f0f0f; --panel:#1c1c1c; --panel2:#242424; --border:#303030; --text:#e3e3e3; --dim:#9a9a9a; --accent:#3ea6ff; }
+  * { box-sizing:border-box; } body { margin:0; background:var(--bg); color:var(--text); font-size:14px; line-height:1.75; }
+  .wrap { max-width:980px; margin:0 auto; padding:28px 20px 80px; } h1 { font-size:22px; margin:0 0 6px; }
+  .sub,.nav { color:var(--dim); font-size:12px; margin-bottom:18px; } h2 { font-size:17px; margin:34px 0 12px; padding:8px 12px; background:var(--panel2); border-left:3px solid var(--accent); border-radius:4px; }
+  table { width:100%; border-collapse:collapse; font-size:13px; margin:10px 0; } th,td { border:1px solid var(--border); padding:6px 10px; text-align:left; vertical-align:top; } th { background:var(--panel2); color:var(--dim); font-size:11px; }
+  code { background:var(--panel2); border:1px solid var(--border); border-radius:3px; padding:1px 5px; font-size:12.5px; } pre { background:#111; border:1px solid var(--border); border-radius:6px; padding:12px 14px; overflow:auto; font-size:12.5px; line-height:1.6; }
+  a { color:var(--accent); }
+</style>
+</head>
+<body><div class="wrap">
+<div class="nav"><a href="./index.html">← ドキュメント一覧</a></div>
+<h1>KawaiiLive 配信パイプライン設計</h1>
+<div class="sub">Control Server / daihon / onair / UI / 最終更新: 2026-06-26</div>
+
+<h2>標準操作フロー</h2>
+<pre><code>1. npm run dev
+2. http://127.0.0.1:14520/ を開く
+3. Script Prepare を実行
+4. live / speech_lines が data/talk-items.sqlite に保存される
+5. Synthesize を実行
+6. speech_lines.audio_path に wav 配列が入る
+7. Radio Start で DB plan を読み、音声付き speech line を再生
+8. 必要に応じて Stop、Emergency Stop、CSV 出力、OBS 操作を行う</code></pre>
+
+<h2>主要 API</h2>
+<table>
+<tr><th>API</th><th>用途</th></tr>
+<tr><td><code>GET /api/status</code></td><td>Ollama、radio、broadcast、OBS、script LLM log の状態。</td></tr>
+<tr><td><code>GET /api/lives</code></td><td>live 一覧。総行数と音声合成済み行数を含む。</td></tr>
+<tr><td><code>GET /api/script?liveId=...</code></td><td>指定 live または最新の DB plan を返す。</td></tr>
+<tr><td><code>GET /api/memories</code></td><td>memory 一覧。</td></tr>
+<tr><td><code>GET /api/sqlite</code>, <code>/api/sqlite/table</code></td><td>SQLite カタログとテーブル閲覧。</td></tr>
+<tr><td><code>GET /api/live/lines</code>, <code>/api/live/audio</code></td><td>speech line と wav 取得。</td></tr>
+<tr><td><code>GET /api/live/csv</code>, <code>/api/live/csv-all</code></td><td>単体 live CSV と全体 ZIP 出力。</td></tr>
+<tr><td><code>POST /api/script/prepare</code></td><td>v3 台本生成。<code>minutes</code>, <code>count</code>, <code>mode</code>, <code>model</code> を受ける。</td></tr>
+<tr><td><code>POST /api/script/cancel</code></td><td>台本生成または音声合成の abort。</td></tr>
+<tr><td><code>POST /api/live/synthesize</code></td><td>未合成 speech line を Irodori で wav 化。</td></tr>
+<tr><td><code>POST /api/radio/start</code></td><td>指定 live の音声付き DB plan を再生開始。</td></tr>
+<tr><td><code>POST /api/radio/stop</code></td><td>安全停止。</td></tr>
+<tr><td><code>POST /api/radio/emergency-stop</code></td><td>即時停止。</td></tr>
+<tr><td><code>POST /api/live/delete</code>, <code>DELETE /api/live</code></td><td>live と speech_lines、および対象 audio ディレクトリを削除。</td></tr>
+<tr><td><code>POST /api/live/eval</code></td><td>live 評価値を保存。</td></tr>
+<tr><td><code>POST /api/obs/*</code></td><td>OBS 接続、切断、配信開始/停止、シーン切替。</td></tr>
+<tr><td><code>GET /api/vector/*</code></td><td>style/topic/flow vector DB の検索と閲覧。</td></tr>
+<tr><td><code>POST /api/server/restart</code>, <code>/api/server/stop</code></td><td>Control Server 再起動、関連プロセス停止。</td></tr>
+<tr><td><code>POST /api/logs/clear</code></td><td>script LLM log と runtime talk log をクリア。</td></tr>
+</table>
+
+<h2>RadioRuntime</h2>
+<p><code>app/onair/radio.js</code> は DB plan を再生キューへ積み、wav を PowerShell の <code>Media.SoundPlayer</code> で同期再生する。字幕は wav 長と文単位分割から推定して <code>currentText</code> に反映する。</p>
+<table>
+<tr><th>状態</th><th>意味</th></tr>
+<tr><td><code>stopped</code></td><td>停止中。台本生成と音声合成を開始可能。</td></tr>
+<tr><td><code>starting</code></td><td>DB plan と runtime state を読み、キューを準備中。</td></tr>
+<tr><td><code>running</code></td><td>produce loop と play loop が動作中。</td></tr>
+<tr><td><code>stopping</code></td><td>安全停止要求済み。</td></tr>
+<tr><td><code>error</code></td><td>音声欠落、再生失敗、DB 読込失敗など。</td></tr>
+</table>
+
+<h2>音声合成</h2>
+<p><code>app/onair/tts.js</code> の <code>IrodoriWorkerClient</code> が <code>uv run --extra {backend} python tts_worker.py</code> を <code>library/irodori</code> で起動する。既定値は <code>IRODORI_BACKEND=cu128</code>、<code>IRODORI_DURATION_SCALE=1.05</code>、<code>IRODORI_NUM_STEPS=24</code>。</p>
+
+<h2>静的アセット</h2>
+<p><code>app/server.js</code> は UI 以外に、avatar、sprite、live2d、背景動画をローカル配信する。背景動画一覧は <code>/api/background-videos</code> から取得し、実体は <code>assets/backgrounds/onair</code> に置く。</p>
+</div></body>
+</html>

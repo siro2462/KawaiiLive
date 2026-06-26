@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>KawaiiLive データフロー解説</title>
+<style>
+  :root { color-scheme: dark; font-family: "Segoe UI","Yu Gothic UI",system-ui,sans-serif; --bg:#0f0f0f; --panel:#1c1c1c; --panel2:#242424; --border:#303030; --text:#e3e3e3; --dim:#9a9a9a; --accent:#3ea6ff; }
+  * { box-sizing:border-box; } body { margin:0; background:var(--bg); color:var(--text); font-size:14px; line-height:1.75; }
+  .wrap { max-width:980px; margin:0 auto; padding:28px 20px 80px; } h1 { font-size:22px; margin:0 0 6px; }
+  .sub,.nav { color:var(--dim); font-size:12px; margin-bottom:18px; } h2 { font-size:17px; margin:34px 0 12px; padding:8px 12px; background:var(--panel2); border-left:3px solid var(--accent); border-radius:4px; }
+  table { width:100%; border-collapse:collapse; font-size:13px; margin:10px 0; } th,td { border:1px solid var(--border); padding:6px 10px; text-align:left; vertical-align:top; } th { background:var(--panel2); color:var(--dim); font-size:11px; }
+  code { background:var(--panel2); border:1px solid var(--border); border-radius:3px; padding:1px 5px; font-size:12.5px; } pre { background:#111; border:1px solid var(--border); border-radius:6px; padding:12px 14px; overflow:auto; font-size:12.5px; line-height:1.6; }
+  a { color:var(--accent); }
+</style>
+</head>
+<body><div class="wrap">
+<div class="nav"><a href="./index.html">← ドキュメント一覧</a></div>
+<h1>KawaiiLive データフロー解説</h1>
+<div class="sub">SQLite / vector-db / audio / logs / UI / 最終更新: 2026-06-26</div>
+
+<h2>全体フロー</h2>
+<pre><code>memory + vector-db + kaidan research
+  → app/daihon/generate.mjs
+  → script items
+  → app/onair/script.js
+  → data/talk-items.sqlite/live + speech_lines
+  → app/onair/tts.js
+  → data/audio/live-{id}/*.wav
+  → app/onair/radio.js
+  → playback + subtitle state
+  → app/ui polling /api/status, /api/lives, /api/live/lines</code></pre>
+
+<h2>主要データ</h2>
+<table>
+<tr><th>データ</th><th>場所</th><th>用途</th></tr>
+<tr><td>memory</td><td><code>data/talk-items.sqlite</code></td><td>台本生成の素材。<code>id</code>, <code>keywords</code>, <code>episode</code> を主に使う。</td></tr>
+<tr><td>live</td><td><code>data/talk-items.sqlite</code></td><td>1本の配信台本単位。タイトル、日付、状態、現在位置、評価値を持つ。</td></tr>
+<tr><td>speech_lines</td><td><code>data/talk-items.sqlite</code></td><td>台本の各ブロック/発話。本文、memory、anchor、LLM req/res、遷移情報、音声 path、再生状態を持つ。</td></tr>
+<tr><td>vector DB</td><td><code>data/vector-db/{style,topic,flow}.sqlite</code></td><td>話し方、話題、流れの検索。<code>app/daihon/vector.mjs</code> が読む。</td></tr>
+<tr><td>audio</td><td><code>data/audio/live-{id}/</code></td><td>Irodori が生成した wav。speech line ごとに単体または chunk 配列で保存。</td></tr>
+<tr><td>script plan mirror</td><td><code>data/logs/script-plan.json</code></td><td>最新 plan の確認用 mirror。実体は DB。</td></tr>
+<tr><td>LLM log</td><td><code>data/logs/script-llm-v3.jsonl</code></td><td>v3 の planning/generation/quality に関するログ。</td></tr>
+<tr><td>radio state</td><td><code>data/logs/radio-state.json</code></td><td>再生履歴と runtime state。version は <code>3</code>。</td></tr>
+</table>
+
+<h2>台本生成時</h2>
+<ol>
+<li>UI が <code>POST /api/script/prepare</code> を呼ぶ。</li>
+<li><code>app/server.js</code> が model profile を解決し、<code>RadioRuntime.prepareScript()</code> を呼ぶ。</li>
+<li><code>app/onair/script.js</code> が分数から block 数を計算し、<code>app/daihon/generate.mjs</code> を呼ぶ。</li>
+<li><code>generate.mjs</code> が memory、vector、怪談 research を使って script item を作る。</li>
+<li><code>app/onair/script.js</code> が <code>live</code> と <code>speech_lines</code> へ保存し、<code>script-plan.json</code> を更新する。</li>
+</ol>
+
+<h2>音声合成時</h2>
+<ol>
+<li>UI が <code>POST /api/live/synthesize</code> を呼ぶ。</li>
+<li><code>RadioRuntime.synthesizeAudio()</code> が対象 live の未合成 speech line を取得する。</li>
+<li><code>splitSpeechText()</code> が長文を約200文字の chunk に分ける。</li>
+<li>Irodori worker が wav を生成し、<code>speech_lines.audio_path</code> に JSON 配列として保存する。</li>
+</ol>
+
+<h2>再生時</h2>
+<ol>
+<li>UI が <code>POST /api/radio/start</code> を呼ぶ。</li>
+<li><code>RadioRuntime.start()</code> が指定 live または最新 DB plan を読む。</li>
+<li>音声が欠けていれば開始せずエラーにする。</li>
+<li>音声 path を queue に積み、PowerShell の <code>Media.SoundPlayer</code> で同期再生する。</li>
+<li>再生済み sequence は <code>live.current_sequence_no</code> と <code>speech_lines.status/spoken_at</code> に反映される。</li>
+</ol>
+
+<h2>UI から見えるデータ</h2>
+<p><code>app/ui/src/api.ts</code> は <code>/api/lives</code>、<code>/api/live/lines</code>、<code>/api/sqlite</code>、<code>/api/vector/table</code>、<code>/api/status</code> を中心にポーリング/取得する。UI は DB と runtime のビューであり、直接ファイルを書き換えない。</p>
+</div></body>
+</html>

@@ -1,0 +1,913 @@
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import React, { useEffect, useRef, useState } from 'react';
+import {
+  BookmarkCheck,
+  ChevronDown,
+  ChevronUp,
+  ListRestart,
+  Play,
+  SidebarClose,
+  SidebarOpen,
+  Square,
+  Terminal,
+  Trash2,
+  Video,
+  Volume2,
+  X,
+} from 'lucide-react';
+import { BroadcastState, ConsoleLog, LiveStream, SpeechLine } from '../types';
+import * as api from '../api';
+
+const ONAIR_WALLPAPER_URL = '';
+
+interface OnAirViewProps {
+  lives: LiveStream[];
+  currentLive: LiveStream | null;
+  onSelectLive: (id: string) => void;
+  speechLines: SpeechLine[];
+  onToggleSpeechLineSpoken: (lineId: string) => void;
+  consoleLogs: ConsoleLog[];
+  onClearLogs: () => void;
+  onAddConsoleLog: (level: 'info' | 'warn' | 'error' | 'success', msg: string) => void;
+  radioStatus: any;
+  onStartRadio: () => Promise<void>;
+  onStopRadio: () => Promise<void>;
+  serverReady: boolean;
+}
+
+export default function OnAirView({
+  lives,
+  currentLive,
+  onSelectLive,
+  speechLines,
+  onToggleSpeechLineSpoken,
+  consoleLogs,
+  onClearLogs,
+  onAddConsoleLog,
+  radioStatus,
+  onStartRadio,
+  onStopRadio,
+  serverReady,
+}: OnAirViewProps) {
+  const [selectedLineIndex, setSelectedLineIndex] = useState(0);
+  const [isScriptQueueExpanded, setIsScriptQueueExpanded] = useState(false);
+  const [consoleOpen, setConsoleOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [localPlaying, setLocalPlaying] = useState(false);
+  const [localPlayingIndex, setLocalPlayingIndex] = useState(-1);
+  const [backgroundVideos, setBackgroundVideos] = useState<{ id: string; label: string; url: string }[]>([]);
+  const [backgroundVideoId, setBackgroundVideoId] = useState('');
+  const activeLineRef = useRef<HTMLDivElement>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const stopRequestedRef = useRef(false);
+  const avatarStageRef = useRef<HTMLDivElement>(null);
+  const avatarTargetRef = useRef({ x: 0, y: 0 });
+  const [avatarCell, setAvatarCell] = useState({ sheet: 'A', row: 1, col: 1 });
+
+  const radioState = radioStatus?.state || 'stopped';
+  const isServerPlaying = radioState === 'running' || radioState === 'starting';
+  const isPlaying = isServerPlaying || localPlaying;
+  const currentScriptNumber = radioStatus?.script?.currentNumber || 0;
+  const spokenNumber = radioStatus?.script?.spokenNumber || 0;
+  const remainingSeconds = radioStatus?.remainingSeconds ?? 600;
+  const elapsedSeconds = Math.max(0, 600 - remainingSeconds);
+  const currentRadioText = radioStatus?.currentText || '';
+  const isSpeaking = radioStatus?.speaking || false;
+
+  const radioLineIndex = isServerPlaying && currentScriptNumber > 0
+    ? speechLines.findIndex(line => line.lineNo === currentScriptNumber)
+    : -1;
+  const currentLineIndex = localPlayingIndex >= 0 ? localPlayingIndex : radioLineIndex >= 0 ? radioLineIndex : selectedLineIndex;
+
+  const broadcastState: BroadcastState =
+    localPlaying || radioState === 'running' ? 'live' :
+    radioState === 'starting' ? 'starting' :
+    radioState === 'stopping' ? 'ending' :
+    radioState === 'error' ? 'ended' :
+    'ready';
+
+  const totalLines = radioStatus?.script?.total || speechLines.length;
+  const progress = totalLines > 0
+    ? (localPlayingIndex >= 0 ? ((localPlayingIndex + 1) / speechLines.length) * 100 : isServerPlaying ? (currentScriptNumber / totalLines) * 100 : ((selectedLineIndex + 1) / speechLines.length) * 100)
+    : 0;
+  const currentLine = speechLines[currentLineIndex];
+  const formattedTime = formatTime(elapsedSeconds);
+  const selectedBackgroundVideo = backgroundVideos.find(video => video.id === backgroundVideoId);
+  const selectedLiveHasAudio = !!currentLive
+    && currentLive.totalLines > 0
+    && currentLive.synthesizedCount > 0
+    && currentLive.synthesizedCount >= currentLive.totalLines
+    && speechLines.length > 0
+    && speechLines.every(line => line.isSynthesized && !!line.audioUrl);
+
+  const playAudioUrl = (url: string) => new Promise<void>((resolve, reject) => {
+    const audio = new Audio(url);
+    audioRef.current = audio;
+    audio.addEventListener('ended', () => resolve(), { once: true });
+    audio.addEventListener('error', () => reject(new Error('HTMLAudioElement error')), { once: true });
+    audio.play().catch(reject);
+  });
+
+  const playSelectedLiveInBrowser = async () => {
+    if (!selectedLiveHasAudio) throw new Error('TTS済みwavが揃っていません。');
+    stopRequestedRef.current = false;
+    setLocalPlaying(true);
+    onAddConsoleLog('info', `Browser audio playback started for live #${currentLive?.id}.`);
+    try {
+      for (let index = 0; index < speechLines.length; index++) {
+        if (stopRequestedRef.current) break;
+        const line = speechLines[index];
+        const urls = line.audioUrls?.length ? line.audioUrls : line.audioUrl ? [line.audioUrl] : [];
+        if (!urls.length) throw new Error(`Line #${line.lineNo} has no wav URL.`);
+        setLocalPlayingIndex(index);
+        setSelectedLineIndex(index);
+        for (const url of urls) {
+          if (stopRequestedRef.current) break;
+          await playAudioUrl(url);
+        }
+      }
+    } finally {
+      audioRef.current = null;
+      setLocalPlaying(false);
+      setLocalPlayingIndex(-1);
+      stopRequestedRef.current = false;
+    }
+  };
+
+  const stopBrowserAudio = () => {
+    stopRequestedRef.current = true;
+    audioRef.current?.pause();
+    if (audioRef.current) audioRef.current.currentTime = 0;
+    audioRef.current = null;
+    setLocalPlaying(false);
+    setLocalPlayingIndex(-1);
+  };
+
+  useEffect(() => {
+    if (isScriptQueueExpanded && activeLineRef.current) {
+      activeLineRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+  }, [currentLineIndex, isScriptQueueExpanded]);
+
+  useEffect(() => {
+    setSelectedLineIndex(0);
+  }, [currentLive?.id]);
+
+  useEffect(() => {
+    api.fetchBackgroundVideos()
+      .then((videos) => {
+        setBackgroundVideos(videos);
+        if (videos.length) setBackgroundVideoId(current => current || videos[0].id);
+      })
+      .catch((error: any) => onAddConsoleLog('warn', `Background videos failed: ${error.message}`));
+  }, [onAddConsoleLog]);
+
+  useEffect(() => {
+    let frameId = 0;
+    let blinkTimer = 0;
+    let blinkSheet: string | null = null;
+    let current = { x: 0, y: 0 };
+    let rendered = { sheet: 'A', row: -1, col: -1 };
+    const rand = (a: number, b: number) => a + Math.random() * (b - a);
+    const clamp = (v: number, a: number, b: number) => Math.min(b, Math.max(a, v));
+
+    const updateRenderedCell = () => {
+      current.x += (avatarTargetRef.current.x - current.x) * 0.25;
+      current.y += (avatarTargetRef.current.y - current.y) * 0.25;
+      const col = clamp(Math.round(((current.x + 1) / 2) * 2), 0, 2);
+      const row = clamp(Math.round(((current.y + 1) / 2) * 2), 0, 2);
+      const sheet = blinkSheet || 'A';
+      if (sheet !== rendered.sheet || row !== rendered.row || col !== rendered.col) {
+        rendered = { sheet, row, col };
+        setAvatarCell(rendered);
+      }
+      frameId = requestAnimationFrame(updateRenderedCell);
+    };
+
+    const scheduleBlink = () => {
+      const u = Math.random();
+      const wait = u < 0.12 ? rand(700, 1500) : u < 0.82 ? rand(1800, 4500) : rand(4500, 9000);
+      blinkTimer = window.setTimeout(doBlink, wait);
+    };
+
+    const blinkSeq = (closeDur: number, after: () => void) => {
+      blinkSheet = 'B';
+      window.setTimeout(() => {
+        blinkSheet = 'C';
+        window.setTimeout(() => {
+          blinkSheet = 'B';
+          window.setTimeout(() => {
+            blinkSheet = null;
+            window.setTimeout(after, rand(80, 160));
+          }, rand(30, 50));
+        }, closeDur);
+      }, rand(30, 50));
+    };
+
+    const doBlink = () => {
+      const roll = Math.random();
+      if (roll < 0.22) blinkSeq(rand(60, 100), () => blinkSeq(rand(50, 90), scheduleBlink));
+      else if (roll < 0.28) blinkSeq(rand(200, 350), scheduleBlink);
+      else blinkSeq(rand(70, 120), scheduleBlink);
+    };
+
+    frameId = requestAnimationFrame(updateRenderedCell);
+    scheduleBlink();
+    return () => {
+      cancelAnimationFrame(frameId);
+      window.clearTimeout(blinkTimer);
+    };
+  }, []);
+
+  const updateAvatarTarget = (event: React.MouseEvent<HTMLDivElement>) => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    const cx = rect.left + rect.width / 2;
+    const cy = rect.top + rect.height * 0.45;
+    avatarTargetRef.current = {
+      x: Math.min(1, Math.max(-1, (event.clientX - cx) / (rect.width / 2))),
+      y: Math.min(1, Math.max(-1, (event.clientY - cy) / (rect.height / 2))),
+    };
+  };
+
+  return (
+    <div className="space-y-5" id="onair-console-suite">
+      <div className="flex flex-col gap-4 bg-slate-50 p-4 md:flex-row md:items-center md:justify-between">
+        <div className="flex flex-wrap items-center gap-4">
+          <div className="flex items-center gap-2">
+            <span className={`h-2.5 w-2.5 rounded-full ${broadcastState === 'live' ? 'bg-rose-500 animate-pulse' : 'bg-amber-400'}`} />
+            <h3 className="font-mono text-xs font-bold uppercase tracking-widest text-slate-800">Live Broadcast Studio</h3>
+          </div>
+
+          <div className="flex items-center gap-1.5 border border-slate-200 bg-white px-2.5 py-1.5">
+            <Video className="h-3.5 w-3.5 text-indigo-500" />
+            <select
+              value={currentLive?.id || ''}
+              onChange={(event) => onSelectLive(event.target.value)}
+              className="cursor-pointer border-none bg-transparent text-[11px] font-bold text-slate-800 outline-none"
+            >
+              {lives.map(live => (
+                <option key={live.id} value={live.id}>
+                  #{live.id} {live.title} ({live.synthesizedCount}/{live.totalLines} wav)
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="flex items-center gap-1.5 border border-slate-200 bg-white px-2.5 py-1.5">
+            <span className="font-mono text-[10px] font-black uppercase text-slate-400">BG</span>
+            <select
+              value={backgroundVideoId}
+              onChange={(event) => setBackgroundVideoId(event.target.value)}
+              className="cursor-pointer border-none bg-transparent text-[11px] font-bold text-slate-800 outline-none"
+            >
+              <option value="">Transparent</option>
+              {backgroundVideos.map(video => (
+                <option key={video.id} value={video.id}>{video.label}</option>
+              ))}
+            </select>
+          </div>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="flex gap-1 border border-slate-200 bg-white p-1">
+            <button
+              onClick={async () => {
+                if (busy) return;
+                setBusy(true);
+                try {
+                  void playSelectedLiveInBrowser().catch((error: any) => {
+                    onAddConsoleLog('error', `Failed to start radio: ${error.message}`);
+                  });
+                } catch (error: any) {
+                  onAddConsoleLog('error', `Failed to start radio: ${error.message}`);
+                } finally {
+                  setBusy(false);
+                }
+              }}
+              disabled={isPlaying || busy || !serverReady || !selectedLiveHasAudio}
+              className="flex min-w-[70px] cursor-pointer items-center justify-center gap-1 border border-indigo-700 bg-indigo-600 px-3 py-1.5 text-[11px] font-black text-white transition disabled:border-transparent disabled:bg-transparent disabled:text-slate-400"
+              title={selectedLiveHasAudio ? 'Play selected live audio' : 'TTS済みwavが揃っていないLiveは再生できません'}
+            >
+              <Play className="h-3.5 w-3.5" />
+              <span>{!serverReady ? 'WAIT' : selectedLiveHasAudio ? 'PLAY' : 'NO WAV'}</span>
+            </button>
+            <button
+              onClick={async () => {
+                if (busy) return;
+                setBusy(true);
+                const timer = setTimeout(() => setBusy(false), 15000);
+                try {
+                  if (localPlaying) {
+                    stopBrowserAudio();
+                    onAddConsoleLog('warn', 'Browser audio playback stopped.');
+                  } else {
+                    await onStopRadio();
+                    onAddConsoleLog('warn', 'Radio playback stopped.');
+                  }
+                } catch (error: any) {
+                  onAddConsoleLog('error', `Failed to stop radio: ${error.message}`);
+                } finally {
+                  clearTimeout(timer);
+                  setBusy(false);
+                }
+              }}
+              disabled={!isPlaying || busy || !serverReady}
+              className="flex min-w-[70px] cursor-pointer items-center justify-center gap-1 border border-slate-200 bg-slate-100 px-3 py-1.5 text-[11px] font-black text-slate-700 transition disabled:border-transparent disabled:bg-transparent disabled:text-slate-400"
+            >
+              <Square className="h-3 w-3" />
+              <span>STOP</span>
+            </button>
+          </div>
+
+          <button
+            onClick={() => setIsScriptQueueExpanded(prev => !prev)}
+            className="flex min-w-[120px] cursor-pointer items-center justify-center gap-1.5 border border-slate-200 bg-white px-3 py-1.5 font-mono text-xs font-bold text-slate-700 transition hover:bg-slate-50"
+          >
+            {isScriptQueueExpanded ? <SidebarClose className="h-4 w-4" /> : <SidebarOpen className="h-4 w-4" />}
+            <span>QUEUE</span>
+          </button>
+
+          <button
+            onClick={() => setConsoleOpen(true)}
+            className="flex cursor-pointer items-center gap-1.5 border border-slate-700 bg-slate-900 px-3 py-1.5 font-mono text-xs font-bold text-white transition hover:bg-slate-800"
+          >
+            <Terminal className="h-4 w-4" />
+            <span>LOG</span>
+          </button>
+        </div>
+      </div>
+
+      <div className="flex flex-col items-stretch gap-5 lg:flex-row">
+        <div className={`flex flex-col gap-4 transition-all duration-300 ${isScriptQueueExpanded ? 'lg:w-[65%]' : 'w-full'}`}>
+          <div className="flex h-full flex-col gap-4 bg-slate-50 p-4 lg:p-5">
+            <div
+              ref={avatarStageRef}
+              onMouseMove={updateAvatarTarget}
+              onMouseLeave={() => { avatarTargetRef.current = { x: 0, y: 0 }; }}
+              className="relative flex aspect-video w-full items-center justify-center overflow-hidden bg-transparent shadow-sm"
+              id="avatar-preview-stage"
+            >
+              <div
+                className="absolute inset-0 bg-transparent bg-cover bg-center"
+                style={ONAIR_WALLPAPER_URL ? { backgroundImage: `url(${ONAIR_WALLPAPER_URL})` } : undefined}
+                aria-hidden="true"
+              />
+              {selectedBackgroundVideo && (
+                <video
+                  key={selectedBackgroundVideo.id}
+                  className="absolute inset-0 h-full w-full object-cover opacity-70"
+                  src={selectedBackgroundVideo.url}
+                  autoPlay
+                  muted
+                  loop
+                  playsInline
+                  aria-hidden="true"
+                />
+              )}
+              <video
+                className="absolute inset-0 z-[1] h-full w-full object-cover"
+                src="/avatar/background.mp4"
+                autoPlay
+                muted
+                loop
+                playsInline
+                aria-hidden="true"
+              />
+
+              <div className="absolute left-4 top-4 z-20 flex items-center gap-2">
+                <span className={`h-2.5 w-2.5 rounded-full ${broadcastState === 'live' ? 'bg-emerald-500 animate-pulse' : 'bg-amber-400'}`} />
+                <span className="font-mono text-[10px] font-bold tracking-wider text-slate-400">ZIPCHAN_ONAIR</span>
+              </div>
+
+              <div className="absolute right-4 top-4 z-20 flex items-center gap-3 font-mono text-[10px] text-slate-400">
+                <span className="border border-slate-800 bg-slate-900 px-2 py-0.5">FPS: 60</span>
+                <span>{speechLines.length} lines</span>
+              </div>
+
+
+              <ClipAvatar isPlaying={isPlaying} speaking={isSpeaking} />
+
+              {/* 字幕オーバーレイ — 1文ずつ表示 */}
+              <SubtitleOverlay text={currentRadioText || (isPlaying ? currentLine?.text : '') || ''} />
+
+              <div className="absolute bottom-4 left-5 right-5 z-20">
+                <div className="flex items-center justify-between pb-1 font-mono text-[10px] text-slate-400">
+                  <span>Script progress</span>
+                  <span>{speechLines.length ? currentLineIndex + 1 : 0} / {speechLines.length}</span>
+                </div>
+                <div className="h-1.5 w-full overflow-hidden bg-slate-900">
+                  <div className="h-full bg-indigo-500 transition-all duration-500" style={{ width: `${progress}%` }} />
+                </div>
+              </div>
+            </div>
+
+            <div className="relative w-full bg-white p-4 lg:p-5">
+              <div className="absolute -top-3 left-5 flex items-center gap-1.5 bg-indigo-600 px-2.5 py-0.5 font-mono text-[10px] font-bold uppercase text-white">
+                <Volume2 className="h-3 w-3" />
+                <span>Now Speaking</span>
+              </div>
+              <p className="whitespace-pre-wrap break-words pt-2 font-sans text-sm font-bold italic leading-relaxed text-slate-850 xl:text-base">
+                {isPlaying ? (currentRadioText || currentLine?.text || 'Waiting for audio...') : (currentLine?.text || 'No speech line selected.')}
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {isScriptQueueExpanded && (
+          <div className="flex shrink-0 animate-fade-in flex-col gap-4 bg-slate-50 p-4 lg:w-[35%]">
+            <div className="flex items-center justify-between border-b border-slate-200 pb-3">
+              <div className="flex items-center gap-1.5">
+                <BookmarkCheck className="h-4 w-4 text-indigo-500" />
+                <h3 className="font-mono text-xs font-bold uppercase tracking-wider text-slate-800">Script Queue</h3>
+              </div>
+              <button
+                onClick={() => {
+                  setSelectedLineIndex(0);
+                  onAddConsoleLog('info', 'Script pointer reset.');
+                }}
+                className="p-1 text-slate-500 hover:text-slate-800"
+                title="Reset queue"
+              >
+                <ListRestart className="h-3.5 w-3.5" />
+              </button>
+            </div>
+
+            <div className="max-h-[620px] min-h-[300px] flex-1 space-y-2 overflow-y-auto pr-1">
+              {speechLines.map((line, index) => {
+                const active = index === currentLineIndex;
+                return (
+                  <div
+                    key={line.id}
+                    ref={active ? activeLineRef : null}
+                    onClick={() => setSelectedLineIndex(index)}
+                    className={`cursor-pointer border p-3 transition ${
+                      active ? 'border-indigo-500 bg-indigo-50 text-indigo-900' : 'border-slate-100 bg-white hover:bg-slate-50'
+                    }`}
+                  >
+                    <div className="mb-1 flex items-center justify-between gap-2">
+                      <span className="font-mono text-[10px] font-black">#{line.lineNo}</span>
+                      <span className={`text-[9px] font-bold ${line.isSynthesized ? 'text-emerald-600' : 'text-slate-400'}`}>
+                        {line.isSynthesized ? 'AUDIO' : 'NO AUDIO'}
+                      </span>
+                    </div>
+                    <p className="line-clamp-3 break-words font-sans text-[11px] leading-relaxed">{line.text}</p>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+      </div>
+
+      <LogPopup
+        open={consoleOpen}
+        logs={consoleLogs}
+        onClose={() => setConsoleOpen(false)}
+        onClear={onClearLogs}
+      />
+    </div>
+  );
+}
+
+function LogPopup({
+  open,
+  logs,
+  onClose,
+  onClear,
+}: {
+  open: boolean;
+  logs: ConsoleLog[];
+  onClose: () => void;
+  onClear: () => void;
+}) {
+  const [collapsed, setCollapsed] = useState(false);
+  if (!open) return null;
+
+  const latestLogs = logs.slice(-160).reverse();
+
+  return (
+    <div className="fixed bottom-5 right-5 z-[1000] w-[min(720px,calc(100vw-40px))] border border-slate-700 bg-slate-950 text-white shadow-2xl">
+      <div className="flex items-center justify-between border-b border-slate-800 px-3 py-2">
+        <div className="flex items-center gap-2">
+          <Terminal className="h-4 w-4 text-indigo-400" />
+          <span className="font-mono text-xs font-black uppercase tracking-widest">Log Console</span>
+          <span className="bg-slate-800 px-1.5 py-0.5 font-mono text-[9px] text-slate-400">{logs.length}</span>
+        </div>
+        <div className="flex items-center gap-1">
+          <button onClick={onClear} className="p-1.5 text-slate-400 hover:bg-slate-900 hover:text-rose-400" title="Clear logs">
+            <Trash2 className="h-3.5 w-3.5" />
+          </button>
+          <button onClick={() => setCollapsed(prev => !prev)} className="p-1.5 text-slate-400 hover:bg-slate-900 hover:text-white" title="Collapse logs">
+            {collapsed ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+          </button>
+          <button onClick={onClose} className="p-1.5 text-slate-400 hover:bg-slate-900 hover:text-white" title="Close logs">
+            <X className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      </div>
+
+      {!collapsed && (
+        <div className="max-h-[420px] overflow-y-auto p-3 font-mono text-[11px] leading-relaxed">
+          {latestLogs.length ? latestLogs.map(log => (
+            <div key={log.id} className="flex gap-2 border-b border-slate-900 py-1.5">
+              <span className="shrink-0 text-slate-600">[{log.timestamp}]</span>
+              <span className={`shrink-0 font-black uppercase ${logColor(log.level)}`}>{log.level}</span>
+              <span className="break-words text-slate-300">{log.message}</span>
+            </div>
+          )) : (
+            <div className="py-10 text-center italic text-slate-500">No logs yet.</div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SubtitleOverlay({ text }: { text: string }) {
+  if (!text) return null;
+  return (
+    <div className="absolute bottom-12 left-4 right-4 z-30 text-center">
+      <span className="inline-block max-w-full truncate rounded bg-black/70 px-4 py-1.5 text-sm font-bold text-white shadow-lg">
+        {text}
+      </span>
+    </div>
+  );
+}
+
+type ClipDef = { frameCount: number; loop: boolean; pingpong?: boolean; next: string | null; startFrame?: number };
+const CLIP_META: Record<string, ClipDef> = {
+  // --- original ---
+  neutral_idle:        { frameCount: 25, loop: true,  next: null },
+  talking_cycle:       { frameCount: 49, loop: true,  next: null },
+  center_soft_blink:   { frameCount: 19, loop: false, next: 'neutral_idle' },
+  side_turn_and_blink: { frameCount: 37, loop: false, next: 'return_from_side' },
+  return_from_side:    { frameCount: 19, loop: false, next: 'neutral_idle' },
+  expression_react:    { frameCount: 19, loop: false, pingpong: true, next: 'neutral_idle' },
+  head_tilt:           { frameCount: 31, loop: false, pingpong: true, next: 'neutral_idle' },
+  neutral_return:      { frameCount: 12, loop: false, next: 'neutral_idle' },
+  // --- head shake ---
+  shake_neutral_start: { frameCount: 25, startFrame: 1, loop: false, next: 'shake_left_dip' },
+  shake_left_dip:      { frameCount: 31, startFrame: 1, loop: false, next: 'shake_right_return' },
+  shake_right_return:  { frameCount: 31, startFrame: 1, loop: false, next: 'shake_settle' },
+  shake_settle:        { frameCount: 37, startFrame: 1, loop: false, next: 'shake_neutral_end' },
+  shake_neutral_end:   { frameCount: 24, startFrame: 1, loop: false, next: 'neutral_idle' },
+  // --- angry ---
+  angry_neutral_start: { frameCount: 25, startFrame: 1, loop: false, next: 'angry_turn_side' },
+  angry_turn_side:     { frameCount: 43, startFrame: 1, loop: false, next: 'angry_hold_side' },
+  angry_hold_side:     { frameCount: 19, startFrame: 1, loop: false, next: 'angry_return_neutral' },
+  angry_return_neutral:{ frameCount: 42, startFrame: 1, loop: false, next: 'neutral_idle' },
+  angry_blink:         { frameCount: 13, startFrame: 1, loop: false, next: 'angry_hold_side' },
+  // --- wave ---
+  wave_neutral_start:  { frameCount: 31, startFrame: 1, loop: false, next: 'wave_raise' },
+  wave_raise:          { frameCount: 31, startFrame: 1, loop: false, next: 'wave_loop' },
+  wave_loop:           { frameCount: 97, startFrame: 1, loop: false, next: 'wave_lower' },
+  wave_lower:          { frameCount: 37, startFrame: 1, loop: false, next: 'wave_neutral_end' },
+  wave_neutral_end:    { frameCount: 48, startFrame: 1, loop: false, next: 'neutral_idle' },
+  // --- big surprise ---
+  surprise_neutral_start:{ frameCount: 31, startFrame: 1, loop: false, next: 'surprise_pop' },
+  surprise_pop:        { frameCount: 37, startFrame: 1, loop: false, next: 'surprise_settle' },
+  surprise_settle:     { frameCount: 37, startFrame: 1, loop: false, next: 'surprise_neutral_end' },
+  surprise_neutral_end:{ frameCount: 60, startFrame: 1, loop: false, next: 'neutral_idle' },
+  // --- dozing ---
+  doze_neutral_start:  { frameCount: 49, startFrame: 1, loop: false, next: 'doze_eyes_close' },
+  doze_eyes_close:     { frameCount: 37, startFrame: 1, loop: false, next: 'doze_sleep_loop' },
+  doze_sleep_loop:     { frameCount: 49, startFrame: 1, loop: false, next: 'startle_wake' },
+  startle_wake:        { frameCount: 49, startFrame: 1, loop: false, next: 'startle_settle' },
+  startle_settle:      { frameCount: 37, startFrame: 1, loop: false, next: 'doze_neutral_end' },
+  doze_neutral_end:    { frameCount: 24, startFrame: 1, loop: false, next: 'neutral_idle' },
+  // --- breathing / glancing ---
+  breathe_idle_loop:   { frameCount: 84, startFrame: 1, loop: true, next: null },
+  hand_to_face_glance: { frameCount: 60, startFrame: 1, loop: false, pingpong: true, next: 'neutral_idle' },
+  soft_blink_breathe:  { frameCount: 96, startFrame: 1, loop: false, next: 'neutral_idle' },
+  // --- mouth talking loop ---
+  mouth_talking_loop:  { frameCount: 240, startFrame: 1, loop: true, next: null },
+  // --- stretch / sigh ---
+  stretch_motion:      { frameCount: 96, startFrame: 1, loop: false, next: 'neutral_end_stretch' },
+  sigh_settle:         { frameCount: 144, startFrame: 1, loop: false, next: 'neutral_end_stretch' },
+  neutral_end_stretch: { frameCount: 24, startFrame: 1, loop: false, next: 'neutral_idle' },
+};
+const CLIP_FPS = 24;
+
+const TALK_CLIP = 'talking_cycle';
+const AUTO_MOTIONS = [
+  'center_soft_blink', 'expression_react', 'head_tilt',
+  'hand_to_face_glance', 'soft_blink_breathe',
+];
+
+function ClipAvatar({ isPlaying, speaking }: { isPlaying: boolean; speaking: boolean }) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const stateRef = useRef({ clip: 'neutral_idle', frame: 0, dir: 1 as 1 | -1 });
+  const cacheRef = useRef<Map<string, HTMLImageElement>>(new Map());
+  const rafRef = useRef(0);
+  const lastFrameTimeRef = useRef(0);
+  const blinkTimerRef = useRef(0);
+  const autoMotionTimerRef = useRef(0);
+  const isPlayingRef = useRef(isPlaying);
+  const speakingRef = useRef(speaking);
+  const wasSpeakingRef = useRef(false);
+  const manualOverrideRef = useRef(false);
+  const [activeLabel, setActiveLabel] = useState('idle');
+
+  isPlayingRef.current = isPlaying;
+  speakingRef.current = speaking;
+
+  useEffect(() => {
+    let running = true;
+    const frameDuration = 1000 / CLIP_FPS;
+
+    const preloadClip = (name: string) => {
+      const meta = CLIP_META[name];
+      if (!meta) return;
+      for (let i = 0; i < meta.frameCount; i++) {
+        const key = `${name}/${i}`;
+        if (!cacheRef.current.has(key)) {
+          const img = new Image();
+          const sf = CLIP_META[name]?.startFrame ?? 0;
+          img.src = `/avatar/clips/${name}/frame_${String(i + sf).padStart(3, '0')}.png`;
+          cacheRef.current.set(key, img);
+        }
+      }
+    };
+
+    Object.keys(CLIP_META).forEach(preloadClip);
+
+    const scheduleNextBlink = () => {
+      blinkTimerRef.current = window.setTimeout(() => {
+        if (!running) return;
+        const s = stateRef.current;
+        if (s.clip === 'neutral_idle') {
+          s.clip = 'center_soft_blink';
+          s.frame = 0;
+          s.dir = 1;
+        }
+        scheduleNextBlink();
+      }, (3 + Math.random() * 4) * 1000);
+    };
+    scheduleNextBlink();
+
+    const scheduleAutoMotion = () => {
+      autoMotionTimerRef.current = window.setTimeout(() => {
+        if (!running) return;
+        const s = stateRef.current;
+        if (s.clip === 'neutral_idle' && !speakingRef.current && !manualOverrideRef.current) {
+          const pick = AUTO_MOTIONS[Math.floor(Math.random() * AUTO_MOTIONS.length)];
+          s.clip = pick;
+          s.frame = 0;
+          s.dir = 1;
+        }
+        scheduleAutoMotion();
+      }, (8 + Math.random() * 12) * 1000);
+    };
+    scheduleAutoMotion();
+
+    const draw = (now: number) => {
+      if (!running) return;
+      const elapsed = now - lastFrameTimeRef.current;
+      if (elapsed >= frameDuration) {
+        lastFrameTimeRef.current = now - (elapsed % frameDuration);
+        const s = stateRef.current;
+        const meta = CLIP_META[s.clip];
+        if (meta) {
+          const key = `${s.clip}/${s.frame}`;
+          const img = cacheRef.current.get(key);
+          const canvas = canvasRef.current;
+          if (img && img.complete && canvas) {
+            if (canvas.width !== img.naturalWidth) canvas.width = img.naturalWidth;
+            if (canvas.height !== img.naturalHeight) canvas.height = img.naturalHeight;
+            const ctx = canvas.getContext('2d')!;
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.drawImage(img, 0, 0);
+
+            // auto-switch to talk clip while actually speaking
+            if (speakingRef.current && !wasSpeakingRef.current && !manualOverrideRef.current) {
+              s.clip = TALK_CLIP; s.frame = 0; s.dir = 1; setActiveLabel('speak');
+            } else if (!speakingRef.current && wasSpeakingRef.current && s.clip === TALK_CLIP) {
+              s.clip = 'neutral_idle'; s.frame = 0; s.dir = 1; setActiveLabel('idle');
+            }
+            wasSpeakingRef.current = speakingRef.current;
+          }
+          s.frame += s.dir;
+          if (meta.loop) {
+            if (s.frame >= meta.frameCount) {
+              s.dir = -1;
+              s.frame = meta.frameCount - 2;
+            } else if (s.frame < 0) {
+              s.dir = 1;
+              s.frame = 1;
+            }
+          } else if (meta.pingpong && s.frame >= meta.frameCount) {
+            s.dir = -1;
+            s.frame = meta.frameCount - 2;
+          } else if (meta.pingpong && s.dir === -1 && s.frame < 0) {
+            s.clip = meta.next || 'neutral_idle';
+            s.frame = 0;
+            s.dir = 1;
+            if (s.clip === 'neutral_idle') { setActiveLabel('idle'); manualOverrideRef.current = false; }
+          } else if (s.frame >= meta.frameCount) {
+            if (meta.next) {
+              s.clip = meta.next;
+              s.frame = 0;
+              s.dir = 1;
+              if (s.clip === 'neutral_idle') { setActiveLabel('idle'); manualOverrideRef.current = false; }
+            } else {
+              s.clip = 'neutral_idle';
+              s.frame = 0;
+              s.dir = 1;
+              setActiveLabel('idle');
+              manualOverrideRef.current = false;
+            }
+          }
+        }
+      }
+      rafRef.current = requestAnimationFrame(draw);
+    };
+    rafRef.current = requestAnimationFrame(draw);
+
+    return () => {
+      running = false;
+      cancelAnimationFrame(rafRef.current);
+      clearTimeout(blinkTimerRef.current);
+      clearTimeout(autoMotionTimerRef.current);
+    };
+  }, []);
+
+  const playClip = (clip: string, label: string) => {
+    stateRef.current.clip = clip;
+    stateRef.current.frame = 0;
+    stateRef.current.dir = 1;
+    manualOverrideRef.current = true;
+    setActiveLabel(label);
+  };
+
+  const [pos, setPos] = useState({ x: 0, y: 0 });
+  const [scale, setScale] = useState(1);
+  const draggingRef = useRef(false);
+  const dragStartRef = useRef({ x: 0, y: 0, px: 0, py: 0 });
+
+  const onPointerDown = (e: React.PointerEvent) => {
+    if ((e.target as HTMLElement).tagName === 'BUTTON') return;
+    draggingRef.current = true;
+    dragStartRef.current = { x: e.clientX, y: e.clientY, px: pos.x, py: pos.y };
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+  };
+  const onPointerMove = (e: React.PointerEvent) => {
+    if (!draggingRef.current) return;
+    const ds = dragStartRef.current;
+    setPos({ x: ds.px + e.clientX - ds.x, y: ds.py + e.clientY - ds.y });
+  };
+  const onPointerUp = () => { draggingRef.current = false; };
+  const onWheel = (e: React.WheelEvent) => {
+    e.preventDefault();
+    setScale((s) => Math.max(0.3, Math.min(3, s - e.deltaY * 0.001)));
+  };
+
+  const buttons: [string, string, string][] = [
+    ['speak', 'talking_cycle', '🗣'],
+    ['speak2', 'mouth_talking_loop', '💬'],
+    ['react', 'expression_react', '😲'],
+    ['think', 'head_tilt', '🤔'],
+    ['look', 'side_turn_and_blink', '👀'],
+    ['shake', 'shake_neutral_start', '🙅'],
+    ['angry', 'angry_neutral_start', '😤'],
+    ['wave', 'wave_neutral_start', '👋'],
+    ['surprise', 'surprise_neutral_start', '😱'],
+    ['doze', 'doze_neutral_start', '😴'],
+    ['breathe', 'breathe_idle_loop', '🌬'],
+    ['glance', 'hand_to_face_glance', '🤭'],
+    ['stretch', 'stretch_motion', '🙆'],
+    ['sigh', 'sigh_settle', '😮‍💨'],
+    ['idle', 'neutral_idle', '●'],
+  ];
+
+  return (
+    <div
+      className="relative flex h-full w-full items-center justify-center bg-transparent z-10 cursor-grab active:cursor-grabbing"
+      aria-label="ZIPちゃん"
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={onPointerUp}
+      onWheel={onWheel}
+    >
+      <canvas
+        ref={canvasRef}
+        className={`max-h-[620px] object-contain ${isPlaying ? '' : ''}`}
+        style={{
+          transform: `translate(${pos.x}px, ${pos.y}px) scale(${scale})`,
+          transformOrigin: 'center center',
+        }}
+      />
+      <div className="absolute right-3 top-3 z-50 flex flex-wrap gap-1">
+        {buttons.map(([label, clip, icon]) => (
+          <button
+            key={label}
+            onClick={() => playClip(clip, label)}
+            className={`rounded-md px-2 py-1 text-xs font-bold shadow ${activeLabel === label ? 'bg-indigo-500 text-white' : 'bg-slate-700 text-slate-300 hover:bg-slate-600'}`}
+          >
+            {icon}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function SpriteAvatar({
+  cell,
+  isPlaying,
+}: {
+  cell: { sheet: string; row: number; col: number };
+  isPlaying: boolean;
+}) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const spriteCacheRef = useRef<Map<string, HTMLCanvasElement>>(new Map());
+
+  useEffect(() => {
+    let cancelled = false;
+    const key = `${cell.sheet}-${cell.row}-${cell.col}`;
+    const src = `/sprites/${cell.sheet}/r${cell.row}c${cell.col}.webp`;
+
+    const render = async () => {
+      const source = spriteCacheRef.current.get(key) || await loadKeyedSprite(src);
+      if (cancelled) return;
+      spriteCacheRef.current.set(key, source);
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      canvas.width = source.width;
+      canvas.height = source.height;
+      const context = canvas.getContext('2d');
+      if (!context) return;
+      context.clearRect(0, 0, canvas.width, canvas.height);
+      context.drawImage(source, 0, 0);
+    };
+
+    void render();
+    return () => {
+      cancelled = true;
+    };
+  }, [cell.sheet, cell.row, cell.col]);
+
+  return (
+    <div className="relative flex h-full w-full items-center justify-center bg-transparent" aria-label="ZIPちゃん">
+      <canvas
+        ref={canvasRef}
+        className={`h-[86%] max-h-[620px] object-contain ${isPlaying ? 'scale-[1.03]' : 'scale-100'}`}
+      />
+    </div>
+  );
+}
+
+function loadKeyedSprite(src: string) {
+  return new Promise<HTMLCanvasElement>((resolve, reject) => {
+    const image = new Image();
+    image.decoding = 'async';
+    image.onload = () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = image.naturalWidth || image.width;
+      canvas.height = image.naturalHeight || image.height;
+      const context = canvas.getContext('2d', { willReadFrequently: true });
+      if (!context) {
+        reject(new Error('Canvas 2D context is not available.'));
+        return;
+      }
+      context.drawImage(image, 0, 0);
+      const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
+      const data = imageData.data;
+      for (let i = 0; i < data.length; i += 4) {
+        const r = data[i];
+        const g = data[i + 1];
+        const b = data[i + 2];
+        const a = data[i + 3];
+        const max = Math.max(r, g, b);
+        const min = Math.min(r, g, b);
+        const avg = (r + g + b) / 3;
+        if (min > 246) {
+          data[i + 3] = 0;
+        } else if (avg > 225 && max - min < 35) {
+          data[i + 3] = Math.max(0, Math.min(a, Math.round((255 - avg) * 8)));
+        }
+      }
+      context.putImageData(imageData, 0, 0);
+      resolve(canvas);
+    };
+    image.onerror = () => reject(new Error(`Sprite image failed: ${src}`));
+    image.src = src;
+  });
+}
+
+function logColor(level: ConsoleLog['level']) {
+  if (level === 'success') return 'text-emerald-400';
+  if (level === 'warn') return 'text-amber-400';
+  if (level === 'error') return 'text-rose-400';
+  return 'text-blue-400';
+}
+
+function formatTime(totalSeconds: number) {
+  const hours = Math.floor(totalSeconds / 3600).toString().padStart(2, '0');
+  const minutes = Math.floor((totalSeconds % 3600) / 60).toString().padStart(2, '0');
+  const seconds = (totalSeconds % 60).toString().padStart(2, '0');
+  return `${hours}:${minutes}:${seconds}`;
+}

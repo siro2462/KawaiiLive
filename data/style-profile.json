@@ -1,0 +1,93 @@
+{
+  "utterances": 303,
+  "charLength": {
+    "mean": 63.419,
+    "median": 69,
+    "p10": 36,
+    "p90": 75
+  },
+  "sentencesPerUtterance": 1.053,
+  "topEndings": [
+    {
+      "ending": "（笑）",
+      "ratio": 0.043
+    },
+    {
+      "ending": "いうか",
+      "ratio": 0.023
+    },
+    {
+      "ending": "だけど",
+      "ratio": 0.017
+    },
+    {
+      "ending": "けどさ",
+      "ratio": 0.01
+    },
+    {
+      "ending": "かなり",
+      "ratio": 0.01
+    },
+    {
+      "ending": "うーん",
+      "ratio": 0.01
+    },
+    {
+      "ending": "本当に",
+      "ratio": 0.01
+    },
+    {
+      "ending": "ゃない",
+      "ratio": 0.01
+    },
+    {
+      "ending": "てきた",
+      "ratio": 0.01
+    },
+    {
+      "ending": "ていう",
+      "ratio": 0.01
+    },
+    {
+      "ending": "いうの",
+      "ratio": 0.007
+    },
+    {
+      "ending": "なるの",
+      "ratio": 0.007
+    },
+    {
+      "ending": "るかな",
+      "ratio": 0.007
+    },
+    {
+      "ending": "たいな",
+      "ratio": 0.007
+    },
+    {
+      "ending": "ました",
+      "ratio": 0.007
+    },
+    {
+      "ending": " から",
+      "ratio": 0.007
+    },
+    {
+      "ending": "ように",
+      "ratio": 0.007
+    },
+    {
+      "ending": "うのは",
+      "ratio": 0.007
+    },
+    {
+      "ending": "なんか",
+      "ratio": 0.007
+    },
+    {
+      "ending": "ないよ",
+      "ratio": 0.007
+    }
+  ],
+  "fillerRate": 0.495
+}

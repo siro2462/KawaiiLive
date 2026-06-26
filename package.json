@@ -1,0 +1,13 @@
+{
+  "name": "kawaii-live",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node scripts/dev.js",
+    "control": "node app/server.js"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

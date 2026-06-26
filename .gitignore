@@ -1,0 +1,37 @@
+# Dependencies
+node_modules/
+
+# Build output
+app/ui/dist/
+
+# LLM models
+data/llama-hip/
+
+# Avatar assets (heavy images/video)
+assets/zipchan/
+assets/background/
+
+# Audio (TTS generated)
+data/audio/
+
+# Runtime DB
+data/talk-items.sqlite
+data/talk-items.sqlite.bak-*
+
+# Generated / rebuildable DB
+data/vector-db/
+data/cards/
+
+# Runtime logs
+data/logs/
+
+# External libraries
+library/
+
+# Claude Code local settings
+.claude/settings.local.json
+
+# OS / editor
+.DS_Store
+Thumbs.db
+*.swp
