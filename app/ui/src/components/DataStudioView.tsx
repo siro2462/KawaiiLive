@@ -415,37 +415,33 @@ export default function DataStudioView({
                         <table className="w-full min-w-[760px] table-auto text-left text-xs">
                           <thead>
                             <tr className="border-b border-slate-200 text-[9px] font-bold uppercase text-slate-500">
-                              <th className="w-16 p-2">#</th>
+                              <th className="w-20 p-2">#</th>
                               <th className="p-2">TEXT</th>
                               <th className="w-36 p-2">KEYWORD</th>
-                              <th className="w-20 p-2 text-center">AUDIO</th>
                               <th className="w-14 p-2 text-center">CSV</th>
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-slate-100 text-[11px] text-slate-700">
                             {lines.map(line => (
                               <tr key={line.id} className="align-top hover:bg-slate-50">
-                                <td className="p-2 align-top font-mono text-[9px] font-bold">#{line.lineNo}</td>
+                                <td className="p-2 align-top font-mono text-[9px] font-bold">
+                                  <span className="mr-1">#{line.lineNo}</span>
+                                  {line.isSynthesized && line.audioUrl ? (
+                                    <button
+                                      type="button"
+                                      onClick={() => void playSpeechLineAudio(line)}
+                                      className={`inline-flex items-center justify-center h-4 w-4 rounded-full ${playingAudioLineId === line.id ? 'bg-emerald-500 text-white' : 'bg-emerald-100 text-emerald-600 hover:bg-emerald-200'}`}
+                                      title={playingAudioLineId === line.id ? 'Playing...' : 'Play audio'}
+                                    >
+                                      <Play className="h-2.5 w-2.5" />
+                                    </button>
+                                  ) : null}
+                                </td>
                                 <td className="whitespace-pre-wrap break-words p-2 align-top font-sans text-[12px] leading-relaxed">
                                   {line.isSynthesized ? <ChunkedText text={line.text} /> : line.text}
                                 </td>
                                 <td className="p-2 align-top">
                                   <span className="inline-block break-words bg-slate-100 px-1 py-0.5 text-[9px]">{line.topic}</span>
-                                </td>
-                                <td className="p-2 align-top text-center text-[9px] font-bold">
-                                  {line.isSynthesized && line.audioUrl ? (
-                                    <button
-                                      type="button"
-                                      onClick={() => void playSpeechLineAudio(line)}
-                                      disabled={!line.audioUrl}
-                                      className="inline-flex items-center gap-1 border border-emerald-200 bg-emerald-50 px-2 py-1 text-[9px] font-black text-emerald-700 hover:bg-emerald-100"
-                                    >
-                                      <Play className="h-3 w-3" />
-                                      {playingAudioLineId === line.id ? 'PLAYING' : 'PLAY'}
-                                    </button>
-                                  ) : (
-                                    <span className="inline-flex items-center border border-slate-200 bg-slate-50 px-2 py-1 text-[9px] font-black text-slate-400">NO WAV</span>
-                                  )}
                                 </td>
                                 <td className="p-2 align-top text-center">
                                   <button

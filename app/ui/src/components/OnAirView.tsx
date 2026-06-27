@@ -249,9 +249,9 @@ export default function OnAirView({
               onChange={(event) => onSelectLive(event.target.value)}
               className="cursor-pointer border-none bg-transparent text-[11px] font-bold text-slate-800 outline-none"
             >
-              {lives.map(live => (
+              {lives.filter(live => live.totalLines > 0 && live.synthesizedCount >= live.totalLines).map(live => (
                 <option key={live.id} value={live.id}>
-                  #{live.id} {live.title} ({live.synthesizedCount}/{live.totalLines} wav)
+                  #{live.id} {live.title} ({live.totalLines} lines)
                 </option>
               ))}
             </select>
