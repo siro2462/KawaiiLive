@@ -19,6 +19,7 @@ export class BroadcastState extends EventEmitter {
     this.startedAt = null;
     this.motion = null;
     this.speaking = false;
+    this.speakingUntil = 0;
   }
 
   get canTransition() {
@@ -40,6 +41,7 @@ export class BroadcastState extends EventEmitter {
 
   setSpeaking(val) {
     this.speaking = !!val;
+    if (val) this.speakingUntil = Date.now() + 1000;
   }
 
   setMotion(clip) {
@@ -48,13 +50,14 @@ export class BroadcastState extends EventEmitter {
   }
 
   snapshot() {
+    const speaking = this.speaking || Date.now() < this.speakingUntil;
     return {
       state: this.state,
       startedAt: this.startedAt,
       elapsedMs: this.startedAt ? Date.now() - this.startedAt : 0,
       canTransition: this.canTransition,
       motion: this.motion,
-      speaking: this.speaking,
+      speaking,
     };
   }
 }

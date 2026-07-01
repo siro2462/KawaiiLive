@@ -147,9 +147,12 @@ export default function OnAirView({
         setSelectedLineIndex(index);
         for (const url of urls) {
           if (stopRequestedRef.current) break;
-          api.broadcastSpeaking(true).catch(() => {});
-          await playAudioUrl(url);
-          api.broadcastSpeaking(false).catch(() => {});
+          await api.broadcastSpeaking(true).catch(() => {});
+          try {
+            await playAudioUrl(url);
+          } finally {
+            await api.broadcastSpeaking(false).catch(() => {});
+          }
         }
       }
     } finally {
@@ -522,10 +525,19 @@ const DEFAULT_IDLE = 'idle_open_loop';
 const TALK_CLIP = 'mouth_talking_loop';
 // any clip chaining back to the old 'neutral_idle' homes to the new default idle
 const homeClip = (name: string | null) => (!name || name === 'neutral_idle' ? DEFAULT_IDLE : name);
-const AUTO_MOTIONS = [
-  'expression_react', 'head_tilt',
-  'hand_to_face_glance', 'soft_blink_breathe',
+const AUTO_MOTIONS: { clip: string; weight: number }[] = [
+  { clip: 'soft_blink_breathe', weight: 5 },
+  { clip: 'head_tilt', weight: 3 },
+  { clip: 'hand_to_face_glance', weight: 2 },
+  { clip: 'expression_react', weight: 1 },
 ];
+function pickWeightedMotion(exclude?: string | null): string {
+  const pool = exclude ? AUTO_MOTIONS.filter(m => m.clip !== exclude) : AUTO_MOTIONS;
+  const total = pool.reduce((s, m) => s + m.weight, 0);
+  let r = Math.random() * total;
+  for (const m of pool) { r -= m.weight; if (r <= 0) return m.clip; }
+  return pool[0].clip;
+}
 
 function ClipAvatar({ isPlaying, speaking, obsMode = false, triggerMotion }: { isPlaying: boolean; speaking: boolean; obsMode?: boolean; triggerMotion?: { clip: string; at: number } | null }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -538,7 +550,9 @@ function ClipAvatar({ isPlaying, speaking, obsMode = false, triggerMotion }: { i
   const isPlayingRef = useRef(isPlaying);
   const speakingRef = useRef(speaking);
   const wasSpeakingRef = useRef(false);
-  const manualOverrideRef = useRef(false);
+  const manualOverrideUntilRef = useRef(0);
+  const lastSpeakingAtRef = useRef(0);
+  const lastAutoMotionClipRef = useRef<string | null>(null);
   const [activeLabel, setActiveLabel] = useState('idle');
 
   isPlayingRef.current = isPlaying;
@@ -582,8 +596,11 @@ function ClipAvatar({ isPlaying, speaking, obsMode = false, triggerMotion }: { i
       autoMotionTimerRef.current = window.setTimeout(() => {
         if (!running) return;
         const s = stateRef.current;
-        if (s.clip === DEFAULT_IDLE && !speakingRef.current && !manualOverrideRef.current) {
-          const pick = AUTO_MOTIONS[Math.floor(Math.random() * AUTO_MOTIONS.length)];
+        const manualActive = Date.now() < manualOverrideUntilRef.current;
+        const silenceMs = Date.now() - lastSpeakingAtRef.current;
+        if (s.clip === DEFAULT_IDLE && !speakingRef.current && !manualActive && silenceMs > 1500) {
+          const pick = pickWeightedMotion(lastAutoMotionClipRef.current);
+          lastAutoMotionClipRef.current = pick;
           s.clip = pick;
           s.frame = 0;
           s.dir = 1;
@@ -611,22 +628,24 @@ function ClipAvatar({ isPlaying, speaking, obsMode = false, triggerMotion }: { i
             ctx.clearRect(0, 0, canvas.width, canvas.height);
             ctx.drawImage(img, 0, 0);
 
-            // auto-switch to talk clip while actually speaking
-            if (speakingRef.current && !wasSpeakingRef.current && !manualOverrideRef.current) {
-              s.clip = TALK_CLIP; s.frame = 0; s.dir = 1; setActiveLabel('speak');
+            if (speakingRef.current && !wasSpeakingRef.current) {
+              manualOverrideUntilRef.current = 0;
+              s.clip = TALK_CLIP;
+              s.frame = Math.floor(Math.random() * Math.min(12, CLIP_META[TALK_CLIP]?.frameCount ?? 1));
+              s.dir = 1;
+              setActiveLabel('speak');
             } else if (!speakingRef.current && wasSpeakingRef.current && s.clip === TALK_CLIP) {
-              s.clip = DEFAULT_IDLE; s.frame = 0; s.dir = 1; setActiveLabel('idle');
+              s.clip = DEFAULT_IDLE; s.frame = 0; s.dir = 1;
+              lastSpeakingAtRef.current = Date.now();
+              setActiveLabel('idle');
             }
             wasSpeakingRef.current = speakingRef.current;
           }
           s.frame += s.dir;
           if (meta.loop) {
             if (s.frame >= meta.frameCount) {
-              s.dir = -1;
-              s.frame = meta.frameCount - 2;
-            } else if (s.frame < 0) {
+              s.frame = 0;
               s.dir = 1;
-              s.frame = 1;
             }
           } else if (meta.pingpong && s.frame >= meta.frameCount) {
             s.dir = -1;
@@ -635,12 +654,12 @@ function ClipAvatar({ isPlaying, speaking, obsMode = false, triggerMotion }: { i
             s.clip = homeClip(meta.next);
             s.frame = 0;
             s.dir = 1;
-            if (s.clip === DEFAULT_IDLE) { setActiveLabel('idle'); manualOverrideRef.current = false; }
+            if (s.clip === DEFAULT_IDLE) { setActiveLabel('idle'); }
           } else if (s.frame >= meta.frameCount) {
             s.clip = homeClip(meta.next);
             s.frame = 0;
             s.dir = 1;
-            if (s.clip === DEFAULT_IDLE) { setActiveLabel('idle'); manualOverrideRef.current = false; }
+            if (s.clip === DEFAULT_IDLE) { setActiveLabel('idle'); }
           }
         }
       }
@@ -660,7 +679,13 @@ function ClipAvatar({ isPlaying, speaking, obsMode = false, triggerMotion }: { i
     stateRef.current.clip = clip;
     stateRef.current.frame = 0;
     stateRef.current.dir = 1;
-    manualOverrideRef.current = true;
+    const meta = CLIP_META[clip];
+    if (clip === DEFAULT_IDLE || clip === TALK_CLIP || (meta?.loop && !meta?.next)) {
+      manualOverrideUntilRef.current = 0;
+    } else {
+      const durationMs = meta ? Math.min((meta.frameCount / CLIP_FPS) * 1000, 4000) : 1500;
+      manualOverrideUntilRef.current = Date.now() + durationMs;
+    }
     setActiveLabel(label);
   };
 
