@@ -8,6 +8,7 @@ import {
   BookmarkCheck,
   ChevronDown,
   ChevronUp,
+  ExternalLink,
   ListRestart,
   Play,
   SidebarClose,
@@ -22,7 +23,6 @@ import {
 import { BroadcastState, ConsoleLog, LiveStream, SpeechLine } from '../types';
 import * as api from '../api';
 
-const ONAIR_WALLPAPER_URL = '';
 
 interface OnAirViewProps {
   lives: LiveStream[];
@@ -37,6 +37,10 @@ interface OnAirViewProps {
   onStartRadio: () => Promise<void>;
   onStopRadio: () => Promise<void>;
   serverReady: boolean;
+  obsMode?: boolean;
+  serverBroadcastState?: string;
+  serverMotion?: { clip: string; at: number } | null;
+  serverSpeaking?: boolean;
 }
 
 export default function OnAirView({
@@ -52,6 +56,10 @@ export default function OnAirView({
   onStartRadio,
   onStopRadio,
   serverReady,
+  obsMode = false,
+  serverBroadcastState = 'idle',
+  serverMotion = null,
+  serverSpeaking = false,
 }: OnAirViewProps) {
   const [selectedLineIndex, setSelectedLineIndex] = useState(0);
   const [isScriptQueueExpanded, setIsScriptQueueExpanded] = useState(false);
@@ -59,22 +67,15 @@ export default function OnAirView({
   const [busy, setBusy] = useState(false);
   const [localPlaying, setLocalPlaying] = useState(false);
   const [localPlayingIndex, setLocalPlayingIndex] = useState(-1);
-  const [backgroundVideos, setBackgroundVideos] = useState<{ id: string; label: string; url: string }[]>([]);
-  const [backgroundVideoId, setBackgroundVideoId] = useState('');
   const activeLineRef = useRef<HTMLDivElement>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const stopRequestedRef = useRef(false);
-  const avatarStageRef = useRef<HTMLDivElement>(null);
-  const avatarTargetRef = useRef({ x: 0, y: 0 });
-  const [avatarCell, setAvatarCell] = useState({ sheet: 'A', row: 1, col: 1 });
 
   const radioState = radioStatus?.state || 'stopped';
   const isServerPlaying = radioState === 'running' || radioState === 'starting';
   const isPlaying = isServerPlaying || localPlaying;
   const currentScriptNumber = radioStatus?.script?.currentNumber || 0;
   const spokenNumber = radioStatus?.script?.spokenNumber || 0;
-  const remainingSeconds = radioStatus?.remainingSeconds ?? 600;
-  const elapsedSeconds = Math.max(0, 600 - remainingSeconds);
   const currentRadioText = radioStatus?.currentText || '';
   const isSpeaking = radioStatus?.speaking || false;
 
@@ -90,13 +91,31 @@ export default function OnAirView({
     radioState === 'error' ? 'ended' :
     'ready';
 
-  const totalLines = radioStatus?.script?.total || speechLines.length;
-  const progress = totalLines > 0
-    ? (localPlayingIndex >= 0 ? ((localPlayingIndex + 1) / speechLines.length) * 100 : isServerPlaying ? (currentScriptNumber / totalLines) * 100 : ((selectedLineIndex + 1) / speechLines.length) * 100)
-    : 0;
+  if (obsMode) {
+    const showLive = serverBroadcastState === 'live';
+    const obsSpeaking = isSpeaking || serverSpeaking;
+    return (
+      <div className="h-full w-full bg-black relative">
+        <video
+          className={`absolute inset-0 h-full w-full object-cover transition-opacity duration-700 ${showLive ? 'opacity-0' : 'opacity-100'}`}
+          src="/avatar/opening.mp4"
+          autoPlay muted loop playsInline
+        />
+        <div className={`absolute inset-0 transition-opacity duration-700 ${showLive ? 'opacity-100' : 'opacity-0'}`}>
+          <video
+            className="absolute inset-0 h-full w-full object-cover"
+            src="/avatar/background.mp4"
+            autoPlay muted loop playsInline
+          />
+          <div className="absolute inset-0 z-10">
+            <ClipAvatar isPlaying={showLive} speaking={showLive && obsSpeaking} obsMode triggerMotion={serverMotion} />
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   const currentLine = speechLines[currentLineIndex];
-  const formattedTime = formatTime(elapsedSeconds);
-  const selectedBackgroundVideo = backgroundVideos.find(video => video.id === backgroundVideoId);
   const selectedLiveHasAudio = !!currentLive
     && currentLive.totalLines > 0
     && currentLive.synthesizedCount > 0
@@ -116,6 +135,7 @@ export default function OnAirView({
     if (!selectedLiveHasAudio) throw new Error('TTS済みwavが揃っていません。');
     stopRequestedRef.current = false;
     setLocalPlaying(true);
+    api.broadcastTransition('live').catch(() => {});
     onAddConsoleLog('info', `Browser audio playback started for live #${currentLive?.id}.`);
     try {
       for (let index = 0; index < speechLines.length; index++) {
@@ -127,7 +147,9 @@ export default function OnAirView({
         setSelectedLineIndex(index);
         for (const url of urls) {
           if (stopRequestedRef.current) break;
+          api.broadcastSpeaking(true).catch(() => {});
           await playAudioUrl(url);
+          api.broadcastSpeaking(false).catch(() => {});
         }
       }
     } finally {
@@ -135,6 +157,8 @@ export default function OnAirView({
       setLocalPlaying(false);
       setLocalPlayingIndex(-1);
       stopRequestedRef.current = false;
+      api.broadcastSpeaking(false).catch(() => {});
+      api.broadcastTransition('idle').catch(() => {});
     }
   };
 
@@ -145,6 +169,8 @@ export default function OnAirView({
     audioRef.current = null;
     setLocalPlaying(false);
     setLocalPlayingIndex(-1);
+    api.broadcastSpeaking(false).catch(() => {});
+    api.broadcastTransition('idle').catch(() => {});
   };
 
   useEffect(() => {
@@ -156,82 +182,6 @@ export default function OnAirView({
   useEffect(() => {
     setSelectedLineIndex(0);
   }, [currentLive?.id]);
-
-  useEffect(() => {
-    api.fetchBackgroundVideos()
-      .then((videos) => {
-        setBackgroundVideos(videos);
-        if (videos.length) setBackgroundVideoId(current => current || videos[0].id);
-      })
-      .catch((error: any) => onAddConsoleLog('warn', `Background videos failed: ${error.message}`));
-  }, [onAddConsoleLog]);
-
-  useEffect(() => {
-    let frameId = 0;
-    let blinkTimer = 0;
-    let blinkSheet: string | null = null;
-    let current = { x: 0, y: 0 };
-    let rendered = { sheet: 'A', row: -1, col: -1 };
-    const rand = (a: number, b: number) => a + Math.random() * (b - a);
-    const clamp = (v: number, a: number, b: number) => Math.min(b, Math.max(a, v));
-
-    const updateRenderedCell = () => {
-      current.x += (avatarTargetRef.current.x - current.x) * 0.25;
-      current.y += (avatarTargetRef.current.y - current.y) * 0.25;
-      const col = clamp(Math.round(((current.x + 1) / 2) * 2), 0, 2);
-      const row = clamp(Math.round(((current.y + 1) / 2) * 2), 0, 2);
-      const sheet = blinkSheet || 'A';
-      if (sheet !== rendered.sheet || row !== rendered.row || col !== rendered.col) {
-        rendered = { sheet, row, col };
-        setAvatarCell(rendered);
-      }
-      frameId = requestAnimationFrame(updateRenderedCell);
-    };
-
-    const scheduleBlink = () => {
-      const u = Math.random();
-      const wait = u < 0.12 ? rand(700, 1500) : u < 0.82 ? rand(1800, 4500) : rand(4500, 9000);
-      blinkTimer = window.setTimeout(doBlink, wait);
-    };
-
-    const blinkSeq = (closeDur: number, after: () => void) => {
-      blinkSheet = 'B';
-      window.setTimeout(() => {
-        blinkSheet = 'C';
-        window.setTimeout(() => {
-          blinkSheet = 'B';
-          window.setTimeout(() => {
-            blinkSheet = null;
-            window.setTimeout(after, rand(80, 160));
-          }, rand(30, 50));
-        }, closeDur);
-      }, rand(30, 50));
-    };
-
-    const doBlink = () => {
-      const roll = Math.random();
-      if (roll < 0.22) blinkSeq(rand(60, 100), () => blinkSeq(rand(50, 90), scheduleBlink));
-      else if (roll < 0.28) blinkSeq(rand(200, 350), scheduleBlink);
-      else blinkSeq(rand(70, 120), scheduleBlink);
-    };
-
-    frameId = requestAnimationFrame(updateRenderedCell);
-    scheduleBlink();
-    return () => {
-      cancelAnimationFrame(frameId);
-      window.clearTimeout(blinkTimer);
-    };
-  }, []);
-
-  const updateAvatarTarget = (event: React.MouseEvent<HTMLDivElement>) => {
-    const rect = event.currentTarget.getBoundingClientRect();
-    const cx = rect.left + rect.width / 2;
-    const cy = rect.top + rect.height * 0.45;
-    avatarTargetRef.current = {
-      x: Math.min(1, Math.max(-1, (event.clientX - cx) / (rect.width / 2))),
-      y: Math.min(1, Math.max(-1, (event.clientY - cy) / (rect.height / 2))),
-    };
-  };
 
   return (
     <div className="space-y-5" id="onair-console-suite">
@@ -257,19 +207,6 @@ export default function OnAirView({
             </select>
           </div>
 
-          <div className="flex items-center gap-1.5 border border-slate-200 bg-white px-2.5 py-1.5">
-            <span className="font-mono text-[10px] font-black uppercase text-slate-400">BG</span>
-            <select
-              value={backgroundVideoId}
-              onChange={(event) => setBackgroundVideoId(event.target.value)}
-              className="cursor-pointer border-none bg-transparent text-[11px] font-bold text-slate-800 outline-none"
-            >
-              <option value="">Transparent</option>
-              {backgroundVideos.map(video => (
-                <option key={video.id} value={video.id}>{video.label}</option>
-              ))}
-            </select>
-          </div>
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
@@ -332,6 +269,14 @@ export default function OnAirView({
           </button>
 
           <button
+            onClick={() => window.open('/?obs', 'kawaiilive-obs', 'width=960,height=540')}
+            className="flex cursor-pointer items-center gap-1.5 border border-indigo-500 bg-indigo-600 px-3 py-1.5 font-mono text-xs font-bold text-white transition hover:bg-indigo-500"
+          >
+            <ExternalLink className="h-4 w-4" />
+            <span>PREVIEW</span>
+          </button>
+
+          <button
             onClick={() => setConsoleOpen(true)}
             className="flex cursor-pointer items-center gap-1.5 border border-slate-700 bg-slate-900 px-3 py-1.5 font-mono text-xs font-bold text-white transition hover:bg-slate-800"
           >
@@ -344,67 +289,6 @@ export default function OnAirView({
       <div className="flex flex-col items-stretch gap-5 lg:flex-row">
         <div className={`flex flex-col gap-4 transition-all duration-300 ${isScriptQueueExpanded ? 'lg:w-[65%]' : 'w-full'}`}>
           <div className="flex h-full flex-col gap-4 bg-slate-50 p-4 lg:p-5">
-            <div
-              ref={avatarStageRef}
-              onMouseMove={updateAvatarTarget}
-              onMouseLeave={() => { avatarTargetRef.current = { x: 0, y: 0 }; }}
-              className="relative flex aspect-video w-full items-center justify-center overflow-hidden bg-transparent shadow-sm"
-              id="avatar-preview-stage"
-            >
-              <div
-                className="absolute inset-0 bg-transparent bg-cover bg-center"
-                style={ONAIR_WALLPAPER_URL ? { backgroundImage: `url(${ONAIR_WALLPAPER_URL})` } : undefined}
-                aria-hidden="true"
-              />
-              {selectedBackgroundVideo && (
-                <video
-                  key={selectedBackgroundVideo.id}
-                  className="absolute inset-0 h-full w-full object-cover opacity-70"
-                  src={selectedBackgroundVideo.url}
-                  autoPlay
-                  muted
-                  loop
-                  playsInline
-                  aria-hidden="true"
-                />
-              )}
-              <video
-                className="absolute inset-0 z-[1] h-full w-full object-cover"
-                src="/avatar/background.mp4"
-                autoPlay
-                muted
-                loop
-                playsInline
-                aria-hidden="true"
-              />
-
-              <div className="absolute left-4 top-4 z-20 flex items-center gap-2">
-                <span className={`h-2.5 w-2.5 rounded-full ${broadcastState === 'live' ? 'bg-emerald-500 animate-pulse' : 'bg-amber-400'}`} />
-                <span className="font-mono text-[10px] font-bold tracking-wider text-slate-400">ZIPCHAN_ONAIR</span>
-              </div>
-
-              <div className="absolute right-4 top-4 z-20 flex items-center gap-3 font-mono text-[10px] text-slate-400">
-                <span className="border border-slate-800 bg-slate-900 px-2 py-0.5">FPS: 60</span>
-                <span>{speechLines.length} lines</span>
-              </div>
-
-
-              <ClipAvatar isPlaying={isPlaying} speaking={isSpeaking} />
-
-              {/* 字幕オーバーレイ — 1文ずつ表示 */}
-              <SubtitleOverlay text={currentRadioText || (isPlaying ? currentLine?.text : '') || ''} />
-
-              <div className="absolute bottom-4 left-5 right-5 z-20">
-                <div className="flex items-center justify-between pb-1 font-mono text-[10px] text-slate-400">
-                  <span>Script progress</span>
-                  <span>{speechLines.length ? currentLineIndex + 1 : 0} / {speechLines.length}</span>
-                </div>
-                <div className="h-1.5 w-full overflow-hidden bg-slate-900">
-                  <div className="h-full bg-indigo-500 transition-all duration-500" style={{ width: `${progress}%` }} />
-                </div>
-              </div>
-            </div>
-
             <div className="relative w-full bg-white p-4 lg:p-5">
               <div className="absolute -top-3 left-5 flex items-center gap-1.5 bg-indigo-600 px-2.5 py-0.5 font-mono text-[10px] font-bold uppercase text-white">
                 <Volume2 className="h-3 w-3" />
@@ -413,6 +297,18 @@ export default function OnAirView({
               <p className="whitespace-pre-wrap break-words pt-2 font-sans text-sm font-bold italic leading-relaxed text-slate-850 xl:text-base">
                 {isPlaying ? (currentRadioText || currentLine?.text || 'Waiting for audio...') : (currentLine?.text || 'No speech line selected.')}
               </p>
+            </div>
+
+            <div className="flex flex-wrap gap-1.5 bg-white p-3">
+              {MOTION_BUTTONS.map(([label, clip, icon]) => (
+                <button
+                  key={label}
+                  onClick={() => api.broadcastMotion(clip)}
+                  className="rounded-md bg-slate-700 px-2.5 py-1.5 text-xs font-bold text-slate-300 shadow hover:bg-slate-600"
+                >
+                  {icon} {label}
+                </button>
+              ))}
             </div>
           </div>
         </div>
@@ -539,6 +435,25 @@ function SubtitleOverlay({ text }: { text: string }) {
 }
 
 type ClipDef = { frameCount: number; loop: boolean; pingpong?: boolean; next: string | null; startFrame?: number };
+const MOTION_BUTTONS: [string, string, string][] = [
+  ['speak', 'mouth_talking_loop', '🗣'],
+  ['blink', 'idle_blink_oneshot', '😌'],
+  ['eyesShut', 'blink_closed_hold', '🙈'],
+  ['react', 'expression_react', '😲'],
+  ['think', 'head_tilt', '🤔'],
+  ['look', 'side_turn_and_blink', '👀'],
+  ['shake', 'shake_neutral_start', '🙅'],
+  ['angry', 'angry_neutral_start', '😤'],
+  ['wave', 'wave_neutral_start', '👋'],
+  ['surprise', 'surprise_neutral_start', '😱'],
+  ['doze', 'doze_neutral_start', '😴'],
+  ['breathe', 'breathe_idle_loop', '🌬'],
+  ['glance', 'hand_to_face_glance', '🤭'],
+  ['stretch', 'stretch_motion', '🙆'],
+  ['shh', 'shh_raise_motion', '🤫'],
+  ['idle', 'idle_open_loop', '●'],
+];
+
 const CLIP_META: Record<string, ClipDef> = {
   // --- original ---
   neutral_idle:        { frameCount: 25, loop: true,  next: null },
@@ -583,24 +498,38 @@ const CLIP_META: Record<string, ClipDef> = {
   breathe_idle_loop:   { frameCount: 84, startFrame: 1, loop: true, next: null },
   hand_to_face_glance: { frameCount: 60, startFrame: 1, loop: false, pingpong: true, next: 'neutral_idle' },
   soft_blink_breathe:  { frameCount: 96, startFrame: 1, loop: false, next: 'neutral_idle' },
-  // --- mouth talking loop ---
-  mouth_talking_loop:  { frameCount: 240, startFrame: 1, loop: true, next: null },
+  // --- mouth talking loop (speaking_mouth: 10s proper mouth-flap) ---
+  mouth_talking_loop:  { frameCount: 240, startFrame: 0, loop: true, next: null },
   // --- stretch / sigh ---
   stretch_motion:      { frameCount: 96, startFrame: 1, loop: false, next: 'neutral_end_stretch' },
   sigh_settle:         { frameCount: 144, startFrame: 1, loop: false, next: 'neutral_end_stretch' },
   neutral_end_stretch: { frameCount: 24, startFrame: 1, loop: false, next: 'neutral_idle' },
+  // --- idle_blink (default-state idle + blink) ---
+  idle_open_loop:      { frameCount: 25, startFrame: 0, loop: true,  next: null },
+  idle_blink_oneshot:  { frameCount: 56, startFrame: 0, loop: false, next: 'idle_open_loop' },
+  idle_open_end:       { frameCount: 15, startFrame: 0, loop: false, next: 'idle_open_loop' },
+  blink_closed_hold:   { frameCount: 41, startFrame: 1, loop: false, next: 'blink_return_open' },
+  blink_return_open:   { frameCount: 24, startFrame: 1, loop: false, next: 'idle_open_loop' },
+  // --- shh / whisper ---
+  shh_raise_motion:    { frameCount: 24, startFrame: 0, loop: false, next: 'shh_whisper_hold' },
+  shh_whisper_hold:    { frameCount: 48, startFrame: 0, loop: false, next: 'shh_return_settle' },
+  shh_return_settle:   { frameCount: 168, startFrame: 0, loop: false, next: 'idle_open_loop' },
 };
 const CLIP_FPS = 24;
 
-const TALK_CLIP = 'talking_cycle';
+// home/default idle and speaking clips (new purpose-built assets)
+const DEFAULT_IDLE = 'idle_open_loop';
+const TALK_CLIP = 'mouth_talking_loop';
+// any clip chaining back to the old 'neutral_idle' homes to the new default idle
+const homeClip = (name: string | null) => (!name || name === 'neutral_idle' ? DEFAULT_IDLE : name);
 const AUTO_MOTIONS = [
-  'center_soft_blink', 'expression_react', 'head_tilt',
+  'expression_react', 'head_tilt',
   'hand_to_face_glance', 'soft_blink_breathe',
 ];
 
-function ClipAvatar({ isPlaying, speaking }: { isPlaying: boolean; speaking: boolean }) {
+function ClipAvatar({ isPlaying, speaking, obsMode = false, triggerMotion }: { isPlaying: boolean; speaking: boolean; obsMode?: boolean; triggerMotion?: { clip: string; at: number } | null }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const stateRef = useRef({ clip: 'neutral_idle', frame: 0, dir: 1 as 1 | -1 });
+  const stateRef = useRef({ clip: DEFAULT_IDLE, frame: 0, dir: 1 as 1 | -1 });
   const cacheRef = useRef<Map<string, HTMLImageElement>>(new Map());
   const rafRef = useRef(0);
   const lastFrameTimeRef = useRef(0);
@@ -639,8 +568,8 @@ function ClipAvatar({ isPlaying, speaking }: { isPlaying: boolean; speaking: boo
       blinkTimerRef.current = window.setTimeout(() => {
         if (!running) return;
         const s = stateRef.current;
-        if (s.clip === 'neutral_idle') {
-          s.clip = 'center_soft_blink';
+        if (s.clip === DEFAULT_IDLE) {
+          s.clip = 'idle_blink_oneshot';
           s.frame = 0;
           s.dir = 1;
         }
@@ -653,7 +582,7 @@ function ClipAvatar({ isPlaying, speaking }: { isPlaying: boolean; speaking: boo
       autoMotionTimerRef.current = window.setTimeout(() => {
         if (!running) return;
         const s = stateRef.current;
-        if (s.clip === 'neutral_idle' && !speakingRef.current && !manualOverrideRef.current) {
+        if (s.clip === DEFAULT_IDLE && !speakingRef.current && !manualOverrideRef.current) {
           const pick = AUTO_MOTIONS[Math.floor(Math.random() * AUTO_MOTIONS.length)];
           s.clip = pick;
           s.frame = 0;
@@ -686,7 +615,7 @@ function ClipAvatar({ isPlaying, speaking }: { isPlaying: boolean; speaking: boo
             if (speakingRef.current && !wasSpeakingRef.current && !manualOverrideRef.current) {
               s.clip = TALK_CLIP; s.frame = 0; s.dir = 1; setActiveLabel('speak');
             } else if (!speakingRef.current && wasSpeakingRef.current && s.clip === TALK_CLIP) {
-              s.clip = 'neutral_idle'; s.frame = 0; s.dir = 1; setActiveLabel('idle');
+              s.clip = DEFAULT_IDLE; s.frame = 0; s.dir = 1; setActiveLabel('idle');
             }
             wasSpeakingRef.current = speakingRef.current;
           }
@@ -703,23 +632,15 @@ function ClipAvatar({ isPlaying, speaking }: { isPlaying: boolean; speaking: boo
             s.dir = -1;
             s.frame = meta.frameCount - 2;
           } else if (meta.pingpong && s.dir === -1 && s.frame < 0) {
-            s.clip = meta.next || 'neutral_idle';
+            s.clip = homeClip(meta.next);
             s.frame = 0;
             s.dir = 1;
-            if (s.clip === 'neutral_idle') { setActiveLabel('idle'); manualOverrideRef.current = false; }
+            if (s.clip === DEFAULT_IDLE) { setActiveLabel('idle'); manualOverrideRef.current = false; }
           } else if (s.frame >= meta.frameCount) {
-            if (meta.next) {
-              s.clip = meta.next;
-              s.frame = 0;
-              s.dir = 1;
-              if (s.clip === 'neutral_idle') { setActiveLabel('idle'); manualOverrideRef.current = false; }
-            } else {
-              s.clip = 'neutral_idle';
-              s.frame = 0;
-              s.dir = 1;
-              setActiveLabel('idle');
-              manualOverrideRef.current = false;
-            }
+            s.clip = homeClip(meta.next);
+            s.frame = 0;
+            s.dir = 1;
+            if (s.clip === DEFAULT_IDLE) { setActiveLabel('idle'); manualOverrideRef.current = false; }
           }
         }
       }
@@ -743,6 +664,13 @@ function ClipAvatar({ isPlaying, speaking }: { isPlaying: boolean; speaking: boo
     setActiveLabel(label);
   };
 
+  const lastMotionAtRef = useRef(0);
+  useEffect(() => {
+    if (!triggerMotion || triggerMotion.at <= lastMotionAtRef.current) return;
+    lastMotionAtRef.current = triggerMotion.at;
+    playClip(triggerMotion.clip, triggerMotion.clip);
+  }, [triggerMotion]);
+
   const [pos, setPos] = useState({ x: 0, y: 0 });
   const [scale, setScale] = useState(1);
   const draggingRef = useRef(false);
@@ -765,137 +693,38 @@ function ClipAvatar({ isPlaying, speaking }: { isPlaying: boolean; speaking: boo
     setScale((s) => Math.max(0.3, Math.min(3, s - e.deltaY * 0.001)));
   };
 
-  const buttons: [string, string, string][] = [
-    ['speak', 'talking_cycle', '🗣'],
-    ['speak2', 'mouth_talking_loop', '💬'],
-    ['react', 'expression_react', '😲'],
-    ['think', 'head_tilt', '🤔'],
-    ['look', 'side_turn_and_blink', '👀'],
-    ['shake', 'shake_neutral_start', '🙅'],
-    ['angry', 'angry_neutral_start', '😤'],
-    ['wave', 'wave_neutral_start', '👋'],
-    ['surprise', 'surprise_neutral_start', '😱'],
-    ['doze', 'doze_neutral_start', '😴'],
-    ['breathe', 'breathe_idle_loop', '🌬'],
-    ['glance', 'hand_to_face_glance', '🤭'],
-    ['stretch', 'stretch_motion', '🙆'],
-    ['sigh', 'sigh_settle', '😮‍💨'],
-    ['idle', 'neutral_idle', '●'],
-  ];
-
   return (
     <div
-      className="relative flex h-full w-full items-center justify-center bg-transparent z-10 cursor-grab active:cursor-grabbing"
+      className={`relative flex h-full w-full items-center justify-center bg-transparent z-10 ${obsMode ? '' : 'cursor-grab active:cursor-grabbing'}`}
       aria-label="ZIPちゃん"
-      onPointerDown={onPointerDown}
-      onPointerMove={onPointerMove}
-      onPointerUp={onPointerUp}
-      onWheel={onWheel}
+      onPointerDown={obsMode ? undefined : onPointerDown}
+      onPointerMove={obsMode ? undefined : onPointerMove}
+      onPointerUp={obsMode ? undefined : onPointerUp}
+      onWheel={obsMode ? undefined : onWheel}
     >
       <canvas
         ref={canvasRef}
         className={`max-h-[620px] object-contain ${isPlaying ? '' : ''}`}
         style={{
-          transform: `translate(${pos.x}px, ${pos.y}px) scale(${scale})`,
+          transform: obsMode ? undefined : `translate(${pos.x}px, ${pos.y}px) scale(${scale})`,
           transformOrigin: 'center center',
         }}
       />
-      <div className="absolute right-3 top-3 z-50 flex flex-wrap gap-1">
-        {buttons.map(([label, clip, icon]) => (
-          <button
-            key={label}
-            onClick={() => playClip(clip, label)}
-            className={`rounded-md px-2 py-1 text-xs font-bold shadow ${activeLabel === label ? 'bg-indigo-500 text-white' : 'bg-slate-700 text-slate-300 hover:bg-slate-600'}`}
-          >
-            {icon}
-          </button>
-        ))}
-      </div>
+      {!obsMode && (
+        <div className="absolute right-3 top-3 z-50 flex flex-wrap gap-1">
+          {MOTION_BUTTONS.map(([label, clip, icon]) => (
+            <button
+              key={label}
+              onClick={() => playClip(clip, label)}
+              className={`rounded-md px-2 py-1 text-xs font-bold shadow ${activeLabel === label ? 'bg-indigo-500 text-white' : 'bg-slate-700 text-slate-300 hover:bg-slate-600'}`}
+            >
+              {icon}
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
-}
-
-function SpriteAvatar({
-  cell,
-  isPlaying,
-}: {
-  cell: { sheet: string; row: number; col: number };
-  isPlaying: boolean;
-}) {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const spriteCacheRef = useRef<Map<string, HTMLCanvasElement>>(new Map());
-
-  useEffect(() => {
-    let cancelled = false;
-    const key = `${cell.sheet}-${cell.row}-${cell.col}`;
-    const src = `/sprites/${cell.sheet}/r${cell.row}c${cell.col}.webp`;
-
-    const render = async () => {
-      const source = spriteCacheRef.current.get(key) || await loadKeyedSprite(src);
-      if (cancelled) return;
-      spriteCacheRef.current.set(key, source);
-      const canvas = canvasRef.current;
-      if (!canvas) return;
-      canvas.width = source.width;
-      canvas.height = source.height;
-      const context = canvas.getContext('2d');
-      if (!context) return;
-      context.clearRect(0, 0, canvas.width, canvas.height);
-      context.drawImage(source, 0, 0);
-    };
-
-    void render();
-    return () => {
-      cancelled = true;
-    };
-  }, [cell.sheet, cell.row, cell.col]);
-
-  return (
-    <div className="relative flex h-full w-full items-center justify-center bg-transparent" aria-label="ZIPちゃん">
-      <canvas
-        ref={canvasRef}
-        className={`h-[86%] max-h-[620px] object-contain ${isPlaying ? 'scale-[1.03]' : 'scale-100'}`}
-      />
-    </div>
-  );
-}
-
-function loadKeyedSprite(src: string) {
-  return new Promise<HTMLCanvasElement>((resolve, reject) => {
-    const image = new Image();
-    image.decoding = 'async';
-    image.onload = () => {
-      const canvas = document.createElement('canvas');
-      canvas.width = image.naturalWidth || image.width;
-      canvas.height = image.naturalHeight || image.height;
-      const context = canvas.getContext('2d', { willReadFrequently: true });
-      if (!context) {
-        reject(new Error('Canvas 2D context is not available.'));
-        return;
-      }
-      context.drawImage(image, 0, 0);
-      const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
-      const data = imageData.data;
-      for (let i = 0; i < data.length; i += 4) {
-        const r = data[i];
-        const g = data[i + 1];
-        const b = data[i + 2];
-        const a = data[i + 3];
-        const max = Math.max(r, g, b);
-        const min = Math.min(r, g, b);
-        const avg = (r + g + b) / 3;
-        if (min > 246) {
-          data[i + 3] = 0;
-        } else if (avg > 225 && max - min < 35) {
-          data[i + 3] = Math.max(0, Math.min(a, Math.round((255 - avg) * 8)));
-        }
-      }
-      context.putImageData(imageData, 0, 0);
-      resolve(canvas);
-    };
-    image.onerror = () => reject(new Error(`Sprite image failed: ${src}`));
-    image.src = src;
-  });
 }
 
 function logColor(level: ConsoleLog['level']) {
@@ -905,9 +734,3 @@ function logColor(level: ConsoleLog['level']) {
   return 'text-blue-400';
 }
 
-function formatTime(totalSeconds: number) {
-  const hours = Math.floor(totalSeconds / 3600).toString().padStart(2, '0');
-  const minutes = Math.floor((totalSeconds % 3600) / 60).toString().padStart(2, '0');
-  const seconds = (totalSeconds % 60).toString().padStart(2, '0');
-  return `${hours}:${minutes}:${seconds}`;
-}

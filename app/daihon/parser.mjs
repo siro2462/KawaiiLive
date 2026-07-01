@@ -8,6 +8,11 @@ function normalizeGeneratedText(text) {
   return String(text || "")
     .replace(/\r?\n{2,}/g, "。")
     .replace(/\r?\n/g, "、")
+    .replace(/。、/g, "。")
+    .replace(/、。/g, "。")
+    .replace(/。、「/g, "。「")
+    .replace(/？。/g, "？")
+    .replace(/！。/g, "！")
     .replace(/、{2,}/g, "、")
     .replace(/。{2,}/g, "。")
     .trim();

@@ -25,6 +25,7 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<TabId>('onair');
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const obsMode = new URLSearchParams(window.location.search).has('obs');
 
   const [lives, setLives] = useState<LiveStream[]>([]);
   const [selectedLiveId, setSelectedLiveId] = useState<string>('');
@@ -123,9 +124,9 @@ export default function App() {
       }
     }).catch(() => {});
     poll();
-    const id = window.setInterval(poll, 2000);
+    const id = window.setInterval(poll, obsMode ? 500 : 2000);
     return () => window.clearInterval(id);
-  }, [addConsoleLog, loadLives, loadSpeechLines, selectedLiveId]);
+  }, [addConsoleLog, loadLives, loadSpeechLines, selectedLiveId, obsMode]);
 
   useEffect(() => {
     if (selectedLiveId) void loadSpeechLines(selectedLiveId);
@@ -191,19 +192,21 @@ export default function App() {
     }
   };
 
-  const handleGenerateTts = async () => {
-    if (!selectedLiveId) {
-      const error = new Error('No live is selected.');
+  const handleGenerateTts = async (liveIds: string[]) => {
+    if (!liveIds.length) {
+      const error = new Error('No lives are checked.');
       addConsoleLog('warn', error.message);
       throw error;
     }
-    addConsoleLog('info', `Starting TTS synthesis for live ${selectedLiveId}.`);
+    addConsoleLog('info', `Starting TTS synthesis for ${liveIds.length} live(s): ${liveIds.map(id => `#${id}`).join(', ')}`);
     try {
-      await api.synthesizeTts(Number(selectedLiveId));
-      addConsoleLog('success', 'TTS synthesis started in the background.');
+      for (const id of liveIds) {
+        await api.synthesizeTts(Number(id));
+        addConsoleLog('success', `TTS synthesis started for live #${id}.`);
+      }
       window.setTimeout(() => {
         void loadLives();
-        void loadSpeechLines(selectedLiveId);
+        if (selectedLiveId) void loadSpeechLines(selectedLiveId);
       }, 2500);
     } catch (error: any) {
       addConsoleLog('error', `TTS failed: ${error.message}`);
@@ -239,6 +242,8 @@ export default function App() {
 
   const ollamaReady = serverStatus?.ollama === true;
   const broadcastState = serverStatus?.broadcast?.state || 'idle';
+  const broadcastMotion = serverStatus?.broadcast?.motion || null;
+  const broadcastSpeaking = serverStatus?.broadcast?.speaking || false;
   const obsConnected = serverStatus?.obs?.connected === true;
   const dbConnected = lives.length > 0;
   const serverReady = serverStatus !== null;
@@ -257,6 +262,31 @@ export default function App() {
       icon: Database,
     },
   ];
+
+  if (obsMode) {
+    return (
+      <div className="h-screen w-screen bg-black overflow-hidden">
+        <OnAirView
+          lives={lives}
+          currentLive={currentLive}
+          onSelectLive={handleSelectLive}
+          speechLines={speechLines}
+          onToggleSpeechLineSpoken={handleToggleSpeechLineSpoken}
+          consoleLogs={consoleLogs}
+          onClearLogs={() => setConsoleLogs([])}
+          onAddConsoleLog={addConsoleLog}
+          radioStatus={serverStatus?.radio}
+          onStartRadio={handleStartRadio}
+          onStopRadio={handleStopRadio}
+          serverReady={serverReady}
+          obsMode
+          serverBroadcastState={broadcastState}
+          serverMotion={broadcastMotion}
+          serverSpeaking={broadcastSpeaking}
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="h-screen w-screen bg-slate-50 text-slate-800 font-sans selection:bg-indigo-150 selection:text-indigo-900 flex flex-col overflow-hidden animate-fade-in">
@@ -408,6 +438,7 @@ export default function App() {
                   onStartRadio={handleStartRadio}
                   onStopRadio={handleStopRadio}
                   serverReady={serverReady}
+                  serverBroadcastState={broadcastState}
                 />
               </div>
             )}

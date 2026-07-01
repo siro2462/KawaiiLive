@@ -56,6 +56,9 @@ export function inspectLine({ line, memory, accepted = [], existingItems = [], d
   if (/元ネタ|料理法|制御情報|プロンプト|文体サンプル|場面役割|文体特徴/.test(line)) {
     issues.push("control_leak");
   }
+  if (/思い出:|source:|topic_words:|entry_hooks:|event_anchors:|recurring_people:|strong_hooks:|weak_hooks:|avoid_abstract:/i.test(line)) {
+    issues.push("control_leak");
+  }
 
   const myouni = (line.match(/妙に/g) || []).length;
   if (myouni >= 3) issues.push("myouni_overuse");

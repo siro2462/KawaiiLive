@@ -90,8 +90,8 @@ const obsClient = new ObsClient();
 const broadcastState = new BroadcastState();
 
 await mkdir(LOGS_DIR, { recursive: true });
-await startOllamaServer();
-startLlamaServer();
+if (process.env.AUTO_START_OLLAMA === "1") await startOllamaServer();
+if (process.env.AUTO_START_LLAMA_SERVER === "1") startLlamaServer();
 
 const MIME_TYPES = {
   ".html": "text/html; charset=utf-8",
@@ -114,6 +114,9 @@ const server = createServer(async (request, response) => {
     const url = new URL(request.url, `http://${request.headers.host}`);
     if (request.method === "GET" && url.pathname === "/avatar/background.mp4") {
       return sendFile(response, path.join(PROJECT_ROOT, "assets", "background", "background.mp4"), "video/mp4", request);
+    }
+    if (request.method === "GET" && url.pathname === "/avatar/opening.mp4") {
+      return sendFile(response, path.join(PROJECT_ROOT, "assets", "background", "opening.mp4"), "video/mp4", request);
     }
     if (request.method === "GET" && url.pathname === "/avatar/clips.json") {
       return sendFile(response, path.join(PROJECT_ROOT, "assets", "zipchan", "metadata", "avatar_clips.json"), "application/json");
@@ -215,6 +218,12 @@ const server = createServer(async (request, response) => {
       const body = await readJson(request);
       const count = Math.max(1, Math.min(20, Number(body.count || 1)));
       const modelSelection = await resolveScriptModel(body.modelProfile || body.model || "");
+      const backend = process.env.RADIO_SCRIPT_LLM_BACKEND || "llama-server";
+      if (backend === "ollama") {
+        await ensureOllamaServer();
+      } else {
+        await ensureLlamaServer();
+      }
       const options = {
         minutes: body.minutes || 30,
         mode: body.mode || "create",
@@ -223,12 +232,26 @@ const server = createServer(async (request, response) => {
         modelProfile: modelSelection.profile || "",
         modelLabel: modelSelection.label || "",
       };
+      const cleanupAfterGeneration = async () => {
+        if (process.env.UNLOAD_MODEL_AFTER_GENERATION === "0") return;
+        if (backend === "ollama") {
+          await unloadOllamaModel(modelSelection.model || "").catch(() => {});
+        } else {
+          stopLlamaServer();
+        }
+      };
       if (count > 1) {
-        runtime.prepareScriptBatch({ ...options, count }).catch((error) => console.error("script batch error:", error.message));
+        runtime.prepareScriptBatch({ ...options, count })
+          .catch((error) => console.error("script batch error:", error.message))
+          .finally(cleanupAfterGeneration);
         return sendJson(response, { ok: true, message: `配信台本のバッチ生成を開始しました (${count}本)。`, radio: runtime.snapshot() });
       }
-      const radio = await runtime.prepareScript(options);
-      return sendJson(response, { ok: true, message: radio.scriptPreparing ? "配信台本の準備を開始しました。" : "配信台本を準備しました。", radio });
+      try {
+        const radio = await runtime.prepareScript(options);
+        return sendJson(response, { ok: true, message: radio.scriptPreparing ? "配信台本の準備を開始しました。" : "配信台本を準備しました。", radio });
+      } finally {
+        await cleanupAfterGeneration();
+      }
     }
     if (request.method === "POST" && url.pathname === "/api/script/cancel") {
       const cancelled = runtime.cancelScript();
@@ -260,6 +283,17 @@ const server = createServer(async (request, response) => {
       } catch (error) {
         return sendJson(response, { error: error.message }, 400);
       }
+    }
+    if (request.method === "POST" && url.pathname === "/api/broadcast/speaking") {
+      const body = await readJson(request);
+      broadcastState.setSpeaking(body.speaking);
+      return sendJson(response, { ok: true });
+    }
+    if (request.method === "POST" && url.pathname === "/api/broadcast/motion") {
+      const body = await readJson(request);
+      if (!body.clip) return sendJson(response, { error: "clip is required" }, 400);
+      const result = broadcastState.setMotion(body.clip);
+      return sendJson(response, { ok: true, motion: result });
     }
     // ---- OBS WebSocket ----
     if (request.method === "POST" && url.pathname === "/api/obs/connect") {
@@ -1101,30 +1135,72 @@ async function startOllamaServer() {
   await waitForUrl(`${OLLAMA_URL}/api/tags`, 45_000, "Ollama");
 }
 
+let llamaServerChild = null;
+
 function startLlamaServer() {
   const llamaDir = path.join(DATA_DIR, "llama-hip");
   const modelPath = path.join(llamaDir, "Qwen3.6-35B-A3B-UD-Q4_K_M.gguf");
   const exe = path.join(llamaDir, "llama-server.exe");
   if (!existsSync(exe) || !existsSync(modelPath)) {
     console.error("llama-server: model or exe not found, skipping");
-    return;
+    return null;
   }
   const port = new URL(process.env.LLAMA_SERVER_URL || "http://127.0.0.1:11435").port || "11435";
-  fetch(`http://127.0.0.1:${port}/health`).then(() => {
-    console.log("llama-server: already running on port " + port);
-  }).catch(() => {
-    const child = spawn(exe, ["-m", modelPath, "--no-mmap", "--reasoning", "off", "-c", "4096", "--port", port], {
-      cwd: llamaDir,
-      windowsHide: true,
-      stdio: ["ignore", "ignore", "pipe"],
-    });
-    child.stderr.on("data", (chunk) => {
-      const line = chunk.toString().trim();
-      if (line.includes("model loaded") || line.includes("listening on")) console.log(`llama-server: ${line.split(" I ").pop()}`);
-    });
-    child.on("error", (err) => console.error("llama-server: spawn failed:", err.message));
-    child.on("exit", (code) => { if (code) console.error(`llama-server: exited with code ${code}`); });
-    process.on("exit", () => { try { child.kill(); } catch {} });
-    console.log(`llama-server: starting on port ${port} (auto-fit, pid ${child.pid})`);
+  const child = spawn(exe, ["-m", modelPath, "--no-mmap", "--reasoning", "off", "-c", "4096", "--port", port], {
+    cwd: llamaDir,
+    windowsHide: true,
+    stdio: ["ignore", "ignore", "pipe"],
   });
+  child.stderr.on("data", (chunk) => {
+    const line = chunk.toString().trim();
+    if (line.includes("model loaded") || line.includes("listening on")) console.log(`llama-server: ${line.split(" I ").pop()}`);
+  });
+  child.on("error", (err) => console.error("llama-server: spawn failed:", err.message));
+  child.on("exit", (code) => {
+    if (code) console.error(`llama-server: exited with code ${code}`);
+    if (llamaServerChild === child) llamaServerChild = null;
+  });
+  process.on("exit", () => { try { child.kill(); } catch {} });
+  console.log(`llama-server: starting on port ${port} (pid ${child.pid})`);
+  return child;
+}
+
+async function ensureLlamaServer() {
+  const port = new URL(process.env.LLAMA_SERVER_URL || "http://127.0.0.1:11435").port || "11435";
+  if (await checkUrl(`http://127.0.0.1:${port}/health`)) return;
+  if (llamaServerChild && !llamaServerChild.killed) return;
+  llamaServerChild = startLlamaServer();
+  if (llamaServerChild) await waitForUrl(`http://127.0.0.1:${port}/health`, 120_000, "llama-server");
+}
+
+function stopLlamaServer() {
+  if (!llamaServerChild) return;
+  try {
+    llamaServerChild.kill();
+    console.log("[llama-server] stopped");
+  } catch (err) {
+    console.warn("[llama-server] stop failed:", err.message);
+  } finally {
+    llamaServerChild = null;
+  }
+}
+
+async function ensureOllamaServer() {
+  if (await checkUrl(`${OLLAMA_URL}/api/tags`)) return;
+  await startOllamaServer();
+}
+
+async function unloadOllamaModel(model) {
+  if (!model) return;
+  try {
+    await fetch(`${OLLAMA_URL}/api/chat`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ model, messages: [], keep_alive: 0 }),
+      signal: AbortSignal.timeout(5000),
+    });
+    console.log(`[ollama] unloaded ${model}`);
+  } catch (err) {
+    console.warn(`[ollama] unload failed: ${model}: ${err.message}`);
+  }
 }

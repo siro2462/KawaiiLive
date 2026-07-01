@@ -33,7 +33,7 @@ async function embedQuery(text) {
   const res = await fetch(`${OLLAMA_URL}/api/embed`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ model: EMBED_MODEL, input: [text] }),
+    body: JSON.stringify({ model: EMBED_MODEL, input: [text], keep_alive: process.env.OLLAMA_EMBED_KEEP_ALIVE || "2m" }),
     signal: AbortSignal.timeout(30000),
   });
   if (!res.ok) throw new Error(`Embed HTTP ${res.status}`);

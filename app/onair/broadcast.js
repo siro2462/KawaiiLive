@@ -1,11 +1,11 @@
 import { EventEmitter } from "node:events";
 
 const TRANSITIONS = {
-  idle:      ["preparing"],
+  idle:      ["preparing", "live"],
   preparing: ["ready", "idle"],
   ready:     ["starting", "idle"],
   starting:  ["live", "idle"],
-  live:      ["pausing", "ending"],
+  live:      ["pausing", "ending", "idle"],
   pausing:   ["paused", "live"],
   paused:    ["live", "ending"],
   ending:    ["ended"],
@@ -17,6 +17,8 @@ export class BroadcastState extends EventEmitter {
     super();
     this.state = "idle";
     this.startedAt = null;
+    this.motion = null;
+    this.speaking = false;
   }
 
   get canTransition() {
@@ -36,12 +38,23 @@ export class BroadcastState extends EventEmitter {
     return this.snapshot();
   }
 
+  setSpeaking(val) {
+    this.speaking = !!val;
+  }
+
+  setMotion(clip) {
+    this.motion = { clip, at: Date.now() };
+    return this.motion;
+  }
+
   snapshot() {
     return {
       state: this.state,
       startedAt: this.startedAt,
       elapsedMs: this.startedAt ? Date.now() - this.startedAt : 0,
       canTransition: this.canTransition,
+      motion: this.motion,
+      speaking: this.speaking,
     };
   }
 }

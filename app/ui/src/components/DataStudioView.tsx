@@ -40,7 +40,7 @@ interface DataStudioViewProps {
     label?: string;
   } | null;
   onGenerateScript?: (durationMinutes: number, count?: number) => void | Promise<void>;
-  onGenerateTts?: () => void | Promise<void>;
+  onGenerateTts?: (liveIds: string[]) => void | Promise<void>;
   serverReady: boolean;
 }
 
@@ -318,8 +318,8 @@ export default function DataStudioView({
             </div>
 
             <button
-              onClick={() => void runWithBusy('tts', onGenerateTts)}
-              disabled={busy !== null || remoteBusy || !serverReady}
+              onClick={() => void runWithBusy('tts', () => onGenerateTts?.(checkedLives))}
+              disabled={busy !== null || remoteBusy || !serverReady || !checkedLives.length}
               className="flex items-center gap-1.5 border border-emerald-700 bg-emerald-600 px-3 py-1.5 text-[11px] font-bold text-white disabled:opacity-50"
             >
               <Volume2 className="h-3.5 w-3.5" />

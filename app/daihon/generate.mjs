@@ -1019,6 +1019,7 @@ async function callOllama({ messages, temperature = 0.7, topP = 0.85, repeatPena
       model: activeScriptModel || defaultModel(),
       messages,
       stream: false,
+      keep_alive: process.env.OLLAMA_KEEP_ALIVE || "30s",
       options: {
         temperature,
         top_p: topP,

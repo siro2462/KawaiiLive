@@ -195,6 +195,30 @@ export async function fetchStatus(): Promise<{
   return fetchJson('/api/status');
 }
 
+export async function broadcastTransition(next: string): Promise<any> {
+  return fetchJson('/api/broadcast/transition', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ next }),
+  });
+}
+
+export async function broadcastSpeaking(speaking: boolean): Promise<any> {
+  return fetchJson('/api/broadcast/speaking', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ speaking }),
+  });
+}
+
+export async function broadcastMotion(clip: string): Promise<any> {
+  return fetchJson('/api/broadcast/motion', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ clip }),
+  });
+}
+
 export async function restartServer(): Promise<void> {
   await fetchJson('/api/server/restart', { method: 'POST' });
 }

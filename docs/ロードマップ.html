@@ -1,0 +1,415 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>KawaiiLive ロードマップ</title>
+<style>
+  :root { color-scheme: dark; font-family: "Segoe UI","Yu Gothic UI",system-ui,sans-serif; --bg:#0f0f0f; --panel:#1c1c1c; --panel2:#242424; --border:#303030; --text:#e3e3e3; --dim:#9a9a9a; --accent:#3ea6ff; --green:#34d399; --yellow:#fbbf24; --red:#f87171; }
+  * { box-sizing:border-box; } body { margin:0; background:var(--bg); color:var(--text); font-size:14px; line-height:1.75; }
+  .wrap { max-width:1020px; margin:0 auto; padding:28px 20px 80px; } h1 { font-size:22px; margin:0 0 6px; }
+  .sub,.nav { color:var(--dim); font-size:12px; margin-bottom:18px; } h2 { font-size:17px; margin:34px 0 12px; padding:8px 12px; background:var(--panel2); border-left:3px solid var(--accent); border-radius:4px; }
+  h3 { font-size:15px; margin:22px 0 8px; color:var(--accent); }
+  table { width:100%; border-collapse:collapse; font-size:13px; margin:10px 0; } th,td { border:1px solid var(--border); padding:6px 10px; text-align:left; vertical-align:top; } th { background:var(--panel2); color:var(--dim); font-size:11px; }
+  code { background:var(--panel2); border:1px solid var(--border); border-radius:3px; padding:1px 5px; font-size:12.5px; } pre { background:#111; border:1px solid var(--border); border-radius:6px; padding:12px 14px; overflow:auto; font-size:12.5px; line-height:1.6; }
+  a { color:var(--accent); }
+  .check { list-style:none; padding:0; margin:6px 0 16px; }
+  .check li { padding:3px 0; font-size:13px; }
+  .check li::before { display:inline-block; width:18px; margin-right:6px; text-align:center; }
+  .check li.done { color:var(--green); } .check li.done::before { content:"✅"; }
+  .check li.todo::before { content:"⬜"; color:var(--dim); }
+  .phase-badge { display:inline-block; font-size:11px; font-weight:700; padding:2px 8px; border-radius:3px; margin-right:6px; vertical-align:middle; }
+  .badge-done { background:#065f46; color:var(--green); }
+  .badge-active { background:#78350f; color:var(--yellow); }
+  .badge-future { background:#1e293b; color:var(--dim); }
+  .tier { display:inline-block; font-size:10px; font-weight:700; padding:1px 6px; border-radius:3px; margin-right:4px; }
+  .tier-s { background:#991b1b; color:#fca5a5; }
+  .tier-a { background:#92400e; color:#fcd34d; }
+  .tier-b { background:#1e3a5f; color:#93c5fd; }
+  .arch-box { background:var(--panel); border:1px solid var(--border); border-radius:6px; padding:14px 18px; margin:10px 0; }
+  .dep-arrow { color:var(--dim); text-align:center; font-size:16px; margin:2px 0; }
+  .note { font-size:12px; color:var(--dim); margin:4px 0 0; }
+</style>
+</head>
+<body><div class="wrap">
+<div class="nav"><a href="./index.html">&larr; ドキュメント一覧</a></div>
+<h1>KawaiiLive ロードマップ</h1>
+<div class="sub">配信運用システム化に向けた全体計画 / 最終更新: 2026-06-28</div>
+
+<!-- ───────────── 全体像 ───────────── -->
+<h2>全体像</h2>
+
+<div class="arch-box">
+<pre style="margin:0;border:none;background:transparent;padding:0"><code>素材レイヤー                     生成レイヤー
+  ├─ memory DB (日常記憶)          ├─ Flow Director
+  ├─ kaidan DB (怪談素材)          ├─ Memory Planner
+  ├─ style DB  (話し方)            ├─ Kaidan Planner
+  ├─ topic DB  (話の運び方)        ├─ Block Generator
+  └─ flow DB   (配信構成)          └─ Quality Inspector
+
+選定レイヤー                     配信レイヤー
+  ├─ 10本生成                      ├─ TTS queue
+  ├─ 自動評価                      ├─ 字幕
+  ├─ 上位候補抽出                  ├─ キャラ表示
+  └─ ChatGPT/人間チェック          ├─ OBS制御
+                                   ├─ 待機/本編/ED画面
+                                   └─ コメント返し</code></pre>
+</div>
+<p class="note">現状: 生成レイヤーがかなり進んでいる。素材レイヤーと配信レイヤーがまだ弱い。</p>
+
+<!-- ───────────── 課題一覧 ───────────── -->
+<h2>課題一覧</h2>
+
+<h3><span class="tier tier-s">S級</span> 先に潰すべき</h3>
+<ul class="check">
+  <li class="done">1. 句読点バグ <code>。、</code></li>
+  <li class="done">2. 内部ラベル漏れ <code>思い出:</code> <code>source:</code> など</li>
+  <li class="done">3. 怪談パートのレポート化</li>
+  <li class="done">4. KAIDAN_MAINが長くなりすぎる</li>
+  <li class="todo">5. 10本から選ぶ評価システムがない</li>
+  <li class="todo">6. 配信用queue形式がない</li>
+  <li class="todo">7. 怪談DB接続が適当</li>
+  <li class="todo">8. memoryがまだ少ない/分解されてない</li>
+</ul>
+
+<h3><span class="tier tier-a">A級</span> 次に必要</h3>
+<ul class="check">
+  <li class="todo">9. topic DBがv3でほぼ死んでいる</li>
+  <li class="todo">10. flow DBがv3で未使用</li>
+  <li class="todo">11. style DBが口癖寄りで、style move化されていない</li>
+  <li class="todo">12. TTS辞書/読み調整がない</li>
+  <li class="todo">13. 初Live/通常Liveモードがない</li>
+  <li class="todo">14. 配信画面/OBSランタイムが未完成</li>
+  <li class="todo">15. コメント返しの挿入ポイントがない</li>
+</ul>
+
+<h3><span class="tier tier-b">B級</span> 運用してから強くする</h3>
+<ul class="check">
+  <li class="todo">16. 配信後ログ分析</li>
+  <li class="todo">17. 視聴維持率/コメント率との紐付け</li>
+  <li class="todo">18. memory自動追加</li>
+  <li class="todo">19. 怪談使用履歴管理</li>
+  <li class="todo">20. 毎日自動生成・自動候補提示</li>
+</ul>
+
+<!-- ───────────── Phase 0 ───────────── -->
+<h2><span class="phase-badge badge-done">DONE</span> Phase 0: 生成バグ修正</h2>
+<p>ここを直さないと、どれだけDBを整理しても出力が汚れる。</p>
+
+<ul class="check">
+  <li class="done"><code>parser.mjs</code> の <code>。、</code> 正規化</li>
+  <li class="done">内部ラベル漏れ検知 (<code>inspector.mjs</code>)</li>
+  <li class="done">kaidan prompt の「感覚に寄せる」「お便り」削除</li>
+  <li class="done">KAIDAN_MAIN を 400〜650字へ制限</li>
+  <li class="done">怪談 raw text を長く渡しすぎない (2000字→900字)</li>
+  <li class="done"><code>prompt.mjs</code> で <code>思い出:</code> → <code>【内部素材】</code> に変更</li>
+  <li class="done">禁止ルールにラベル名一覧を追加</li>
+  <li class="todo">初Liveモードの禁止語追加 (おかえり, 今日も, etc.)</li>
+</ul>
+
+<table>
+<tr><th>完了条件</th><th>状態</th></tr>
+<tr><td><code>。、</code> が0件</td><td style="color:var(--green)">✅ parser修正済み</td></tr>
+<tr><td><code>思い出:</code> <code>source:</code> 漏れ0件</td><td style="color:var(--green)">✅ inspector + prompt修正済み</td></tr>
+<tr><td>KAIDAN_MAINが650字前後に収まる</td><td style="color:var(--green)">✅ 400〜650字指定</td></tr>
+<tr><td>「お便り」「システム」「事実ベース」が減る</td><td style="color:var(--green)">✅ prompt全面書き直し</td></tr>
+</table>
+
+<!-- ───────────── Phase 1 ───────────── -->
+<h2><span class="phase-badge badge-future">TODO</span> Phase 1: 10本生成→1本選定システム</h2>
+<p>毎日10本作るなら、自動評価が必須。全部人間が見るのは無理。</p>
+
+<h3>評価スコア体系</h3>
+<pre><code>quality_score
+  ├─ punctuation_score       句読点バグ
+  ├─ leak_score              内部ラベル漏れ
+  ├─ abstract_score          抽象感覚語の数
+  ├─ duplicate_score         重複率
+  ├─ kaidan_score            怪談パートの品質
+  ├─ first_live_score        初Live適合度
+  ├─ naturalness_score       自然さ
+  └─ broadcast_safety_score  配信安全性</code></pre>
+
+<h3>自動で落とす条件</h3>
+<ul class="check">
+  <li class="todo">内部ラベル漏れあり</li>
+  <li class="todo">句読点バグ多い</li>
+  <li class="todo">KAIDAN_MAINが900字超え</li>
+  <li class="todo">前回/今日も/おかえり等が初Liveに混入</li>
+  <li class="todo">怪談がレポート化</li>
+  <li class="todo">previous_tailコピーが強い</li>
+  <li class="todo">制御語 <code>ルール</code> <code>プロンプト</code> <code>本文にない</code> が本文に出る</li>
+</ul>
+
+<h3>完了形</h3>
+<pre><code>10本生成 → 自動評価 → 上位3本だけ表示 → ChatGPT/人間が最終確認 → 採用1本を配信用queueへ変換</code></pre>
+
+<!-- ───────────── Phase 2 ───────────── -->
+<h2><span class="phase-badge badge-future">TODO</span> Phase 2: 怪談DBの整理</h2>
+<p>怪談 raw text をそのまま渡さず、<code>stream_card</code> に変換する。</p>
+
+<h3>stream_card 形式</h3>
+<pre><code>{
+  "title": "七人みさき",
+  "one_line": "七人一組で現れるとされる伝承。",
+  "key_points": [
+    "七人の数が変わらないと語られる",
+    "出会った人が次の一人になるという話がある",
+    "海や川で亡くなった人の霊として語られることがある"
+  ],
+  "stream_angle": "人数がずっと七人のままという決まりごとの嫌さ",
+  "daily_return_hooks": ["夜道", "人数を数える", "駅", "コンビニ帰り"],
+  "do_not_say": [
+    "事実だと断定しない",
+    "現地で体験したように話さない",
+    "資料説明を長くしない"
+  ],
+  "risk_level": 2,
+  "scary_level": 3
+}</code></pre>
+
+<h3>怪談DBに追加したい情報</h3>
+<table>
+<tr><th>フィールド</th><th>用途</th></tr>
+<tr><td><code>summary_for_stream</code></td><td>配信用の短い要約</td></tr>
+<tr><td><code>key_points</code></td><td>核心ポイント（最大3つ）</td></tr>
+<tr><td><code>stream_angle</code></td><td>配信で話す切り口</td></tr>
+<tr><td><code>return_hooks</code></td><td>日常に戻すhook</td></tr>
+<tr><td><code>risk_level</code></td><td>配信リスク</td></tr>
+<tr><td><code>scary_level</code></td><td>怖さレベル</td></tr>
+<tr><td><code>used_count</code></td><td>使用回数</td></tr>
+<tr><td><code>last_used_at</code></td><td>最終使用日</td></tr>
+</table>
+
+<ul class="check">
+  <li class="todo">generatorにraw_textを直接渡さない</li>
+  <li class="todo">怪談の説明が最大3文で済む</li>
+  <li class="todo">日常雑談に戻るhookがある</li>
+  <li class="todo">同じ怪談を連続使用しない</li>
+  <li class="todo">リスク高い怪談を避けられる</li>
+</ul>
+
+<!-- ───────────── Phase 3 ───────────── -->
+<h2><span class="phase-badge badge-future">TODO</span> Phase 3: memory / topic / style / flow の再整理</h2>
+<p>設計の中核。素材レイヤーの再定義。</p>
+
+<h3>memory DB — 具体記憶の唯一の出所</h3>
+<pre><code>{
+  "episode": "夜中にセブンでスイーツを買った",
+  "objects":  ["レシート", "袋", "スプーン", "店員さん"],
+  "actions":  [
+    "袋の中身をもう一回確認する",
+    "店員さんの顔を見ない",
+    "レシートを見る"
+  ],
+  "micro_conflicts": [
+    "スプーンが多くて食べる気満々に見られた気がする"
+  ],
+  "social_gaze": [
+    "店員さんに覚えられてそう"
+  ]
+}</code></pre>
+
+<p>特に重要な追加フィールド: <code>actions</code>, <code>micro_conflicts</code>, <code>social_gaze</code><br>
+これを入れると、抽象語に逃げにくくなる。</p>
+
+<h3>topic DB → topic_pattern として再定義</h3>
+<p>topicは具体素材ではなく、話の運び方として使う。</p>
+<pre><code>{
+  "handling": "小さい恥ずかしさから、他人の目線へ進め、最後に自己ツッコミで落とす",
+  "preferred_atom_types": ["micro_conflict", "social_gaze", "action"],
+  "avoid": ["abstract_explanation", "lesson_like_summary"]
+}</code></pre>
+<p class="note">注意: <code>topic_hint</code> を自由文で復活させるのはNG。また別話題混入する。</p>
+
+<h3>style DB → style_moves へ変換</h3>
+<pre><code>{
+  "move_type": "self_tsukkomi",
+  "trigger": "小さい行動をした直後",
+  "operation": "自分で軽くツッコむ",
+  "example": "いや、何してんの私。"
+}</code></pre>
+
+<p>必要な style move:</p>
+<table>
+<tr><th>move</th><th>説明</th></tr>
+<tr><td><code>self_correction</code></td><td>言い直し</td></tr>
+<tr><td><code>self_tsukkomi</code></td><td>自分にツッコミ</td></tr>
+<tr><td><code>lost_thread</code></td><td>話を見失う</td></tr>
+<tr><td><code>tiny_laugh</code></td><td>小さい笑い</td></tr>
+<tr><td><code>object_escape</code></td><td>目の前の物に逃げる</td></tr>
+<tr><td><code>listener_shadow</code></td><td>リスナーの存在をうっすら意識</td></tr>
+<tr><td><code>failed_explanation</code></td><td>説明しようとして失敗</td></tr>
+<tr><td><code>return_to_object</code></td><td>手元の物に戻る</td></tr>
+</table>
+
+<h3>flow DB — Live全体の型</h3>
+<pre><code>{
+  "flow_profile": "daily_zatsudan_to_kaidan_to_daily_return",
+  "kaidan_position": "middle",
+  "deep_dive_ratio": 0.35,
+  "reset_limit": 0.25,
+  "ed_tone": "loose"
+}</code></pre>
+<p class="note">今すぐ必須ではない。長期的には「毎回同じ構成」を避けるために使う。</p>
+
+<ul class="check">
+  <li class="todo">memory atoms化 (objects/actions/micro_conflicts/social_gaze)</li>
+  <li class="todo">topic DBをtopic_patternとして再定義</li>
+  <li class="todo">style DBをstyle_movesへ変換</li>
+  <li class="todo">flow DBをLive開始時profileとして復活</li>
+</ul>
+
+<!-- ───────────── Phase 4 ───────────── -->
+<h2><span class="phase-badge badge-active">ACTIVE</span> Phase 4: 配信用queueとランタイム</h2>
+<p>生成CSVをそのまま配信に流すのは危ない。中間形式が必要。</p>
+
+<h3>broadcast queue 項目</h3>
+<pre><code>{
+  "id": 1,
+  "text": "あー、聞こえてるかな。",
+  "tts_text": "あー、聞こえてるかな。",
+  "subtitle_text": "あー、聞こえてるかな。",
+  "section": "OP",
+  "emotion": "neutral",
+  "motion": "idle",
+  "can_interrupt_after": true,
+  "comment_reply_mode": "short",
+  "bgm_mode": "normal",
+  "risk_flags": []
+}</code></pre>
+
+<h3>ランタイムに必要なもの</h3>
+<ul class="check">
+  <li class="done">TTS queue (<code>app/onair/radio.js</code>)</li>
+  <li class="done">字幕表示 (<code>SubtitleOverlay</code>)</li>
+  <li class="done">キャラ表示 (<code>ClipAvatar</code>)</li>
+  <li class="todo">待機画面</li>
+  <li class="todo">本編画面</li>
+  <li class="todo">ED画面</li>
+  <li class="todo">OBS制御 (接続済み、シーン切替は手動)</li>
+  <li class="todo">エラー時のつなぎ台詞</li>
+  <li class="done">手動停止ボタン</li>
+</ul>
+
+<table>
+<tr><th>完了条件</th><th>状態</th></tr>
+<tr><td>コメントなしで30分配信が通る</td><td style="color:var(--yellow)">⚠ TTS/字幕はOK、画面遷移が未完</td></tr>
+<tr><td>TTSが止まらない</td><td style="color:var(--green)">✅</td></tr>
+<tr><td>字幕が出る</td><td style="color:var(--green)">✅</td></tr>
+<tr><td>待機→本編→EDが切り替わる</td><td style="color:var(--red)">❌ 未実装</td></tr>
+<tr><td>途中エラー時に止まらない</td><td style="color:var(--yellow)">⚠ 部分的</td></tr>
+</table>
+
+<!-- ───────────── Phase 5 ───────────── -->
+<h2><span class="phase-badge badge-future">TODO</span> Phase 5: コメント返し</h2>
+<p>コメント返しは最後でいい。最初から自由会話させると崩れる。</p>
+
+<h3>最初の実装</h3>
+<ul class="check">
+  <li class="todo">台本の切れ目だけで拾う</li>
+  <li class="todo">1〜3文で返す</li>
+  <li class="todo">すぐ元の話に戻る</li>
+  <li class="todo">怪談MAIN中は拾わない</li>
+</ul>
+
+<h3>コメント返しポイント</h3>
+<table>
+<tr><th>OKポイント</th><th>NGポイント</th></tr>
+<tr><td>雑談ブロック後</td><td>KAIDAN_MAIN中</td></tr>
+<tr><td>話題転換前</td><td>怖い話のオチ直前</td></tr>
+<tr><td>KAIDAN_OP前</td><td>TTS再生中</td></tr>
+<tr><td>KAIDAN_ED後</td><td>長文説明の途中</td></tr>
+<tr><td>ED前</td><td></td></tr>
+</table>
+
+<h3>安全処理</h3>
+<ul class="check">
+  <li class="todo">荒らしを拾わない</li>
+  <li class="todo">個人情報を読まない</li>
+  <li class="todo">センシティブ話題に乗らない</li>
+  <li class="todo">同じ人ばかり拾わない</li>
+  <li class="todo">コメントに本筋を乗っ取らせない</li>
+</ul>
+
+<!-- ───────────── Phase 6 ───────────── -->
+<h2><span class="phase-badge badge-future">TODO</span> Phase 6: 自動運用・改善ループ</h2>
+
+<pre><code>朝/昼:                           夕方:
+  memory追加                       自動評価
+  怪談DB更新                       上位3本抽出
+  10本生成                         ChatGPT最終チェック
+                                   採用1本決定
+
+夜:                               配信後:
+  broadcast queue作成               ログ保存
+  TTS/字幕/画面セット               良かった表現をstyle/memoryへ戻す
+  配信                             悪かった箇所をNGルールへ追加</code></pre>
+
+<!-- ───────────── 依存関係 ───────────── -->
+<h2>依存関係と優先順位</h2>
+
+<div class="arch-box">
+<pre style="margin:0;border:none;background:transparent;padding:0"><code>句読点/漏れ修正 ✅
+    ↓
+怪談DB stream_card化
+    ↓
+memory atoms化
+    ↓
+10本自動評価
+    ↓
+broadcast queue
+    ↓
+コメントなし初Live
+    ↓
+コメント返し
+    ↓
+flow/style再整理</code></pre>
+</div>
+
+<h3>最短ロードマップ</h3>
+<table>
+<tr><th>順序</th><th>タスク</th><th>状態</th></tr>
+<tr><td>1</td><td>生成バグ修正 (parser, kaidan, inspector)</td><td style="color:var(--green)">✅ 完了</td></tr>
+<tr><td>2</td><td>怪談DBの stream_card 化</td><td>⬜</td></tr>
+<tr><td>3</td><td>10本から選ぶ自動評価</td><td>⬜</td></tr>
+<tr><td>4</td><td>配信用 queue 作成</td><td>⬜</td></tr>
+<tr><td>5</td><td>コメントなしで初Live</td><td>⬜</td></tr>
+<tr><td>6</td><td>memory atoms 追加</td><td>⬜</td></tr>
+<tr><td>7</td><td>topic / style / flow 整理</td><td>⬜</td></tr>
+<tr><td>8</td><td>コメント返し</td><td>⬜</td></tr>
+</table>
+
+<!-- ───────────── インフラ改善（実施済み） ───────────── -->
+<h2>インフラ改善（実施済み）</h2>
+<p>Phase 0 と並行して実施した基盤改善。</p>
+
+<ul class="check">
+  <li class="done">assets/ 整理 (zipchan, background, vtuber台本)</li>
+  <li class="done">不要ファイル・ディレクトリ削除 (workspace/, work/tools/, etc.)</li>
+  <li class="done">dead routes 削除 (person/layers, sprites, live2D)</li>
+  <li class="done">GitHub push + .gitignore 設定</li>
+  <li class="done">DataStudio AUDIO列統合 (#セル内に再生ボタン)</li>
+  <li class="done">OnAirプルダウン: WAV完了Liveのみ表示</li>
+  <li class="done">TTSボタン: checkedLives ベースに変更</li>
+  <li class="done">LLMサーバー lazy起動化 (起動時にモデルをロードしない)</li>
+  <li class="done">Ollama keep_alive 設定 (生成後に自動unload)</li>
+  <li class="done">Windows Terminal 古いプロファイル削除</li>
+</ul>
+
+<!-- ───────────── 結論 ───────────── -->
+<h2>結論</h2>
+<div class="arch-box">
+<p style="margin:0;font-size:13px;">
+<strong>台本を作る機能は育ってきた。でも、素材管理・選定・配信実行の土台がまだ弱い。</strong><br><br>
+次にやるべきは生成モデルをいじることではなく、<strong>DB整理 + 評価 + 配信queue</strong> を作ること。<br><br>
+特に重要な3つ:<br>
+&nbsp;&nbsp;1. 怪談DBを stream_card 化する<br>
+&nbsp;&nbsp;2. memoryを atoms 化する<br>
+&nbsp;&nbsp;3. 10本から選ぶ自動評価を作る<br><br>
+ここができると、毎日1本の安定配信にかなり近づく。
+</p>
+</div>
+
+</div></body>
+</html>
