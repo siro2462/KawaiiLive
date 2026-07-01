@@ -11,6 +11,9 @@ data/llama-hip/
 assets/zipchan/
 assets/background/
 
+# VTuber台本（非公開コンテンツ）
+assets/vtuber台本/
+
 # Audio (TTS generated)
 data/audio/
 
