@@ -97,11 +97,11 @@ export default function OnAirView({
     return (
       <div className="h-full w-full bg-black relative">
         <video
-          className={`absolute inset-0 h-full w-full object-cover transition-opacity duration-700 ${showLive ? 'opacity-0' : 'opacity-100'}`}
+          className={`absolute inset-0 h-full w-full object-cover transition-opacity duration-300 ${showLive ? 'opacity-0' : 'opacity-100'}`}
           src="/avatar/opening.mp4"
           autoPlay muted loop playsInline
         />
-        <div className={`absolute inset-0 transition-opacity duration-700 ${showLive ? 'opacity-100' : 'opacity-0'}`}>
+        <div className={`absolute inset-0 transition-opacity duration-300 ${showLive ? 'opacity-100' : 'opacity-0'}`}>
           <video
             className="absolute inset-0 h-full w-full object-cover"
             src="/avatar/background.mp4"
@@ -135,7 +135,8 @@ export default function OnAirView({
     if (!selectedLiveHasAudio) throw new Error('TTS済みwavが揃っていません。');
     stopRequestedRef.current = false;
     setLocalPlaying(true);
-    api.broadcastTransition('live').catch(() => {});
+    await api.broadcastTransition('live').catch(() => {});
+    await new Promise(r => setTimeout(r, 600));
     onAddConsoleLog('info', `Browser audio playback started for live #${currentLive?.id}.`);
     try {
       for (let index = 0; index < speechLines.length; index++) {
@@ -153,6 +154,11 @@ export default function OnAirView({
           } finally {
             await api.broadcastSpeaking(false).catch(() => {});
           }
+        }
+        if (index < speechLines.length - 1 && !stopRequestedRef.current) {
+          const motionClip = pickWeightedMotion(null);
+          api.broadcastMotion(motionClip).catch(() => {});
+          await new Promise(r => setTimeout(r, 2000 + Math.random() * 1500));
         }
       }
     } finally {

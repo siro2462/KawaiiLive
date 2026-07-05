@@ -34,7 +34,7 @@
 <body><div class="wrap">
 <div class="nav"><a href="./index.html">&larr; ドキュメント一覧</a></div>
 <h1>KawaiiLive ロードマップ</h1>
-<div class="sub">配信運用システム化に向けた全体計画 / 最終更新: 2026-06-28</div>
+<div class="sub">配信運用システム化に向けた全体計画 / 最終更新: 2026-07-04</div>
 
 <!-- ───────────── 全体像 ───────────── -->
 <h2>全体像</h2>
@@ -77,19 +77,624 @@
   <li class="todo">9. topic DBがv3でほぼ死んでいる</li>
   <li class="todo">10. flow DBがv3で未使用</li>
   <li class="todo">11. style DBが口癖寄りで、style move化されていない</li>
-  <li class="todo">12. TTS辞書/読み調整がない</li>
-  <li class="todo">13. 初Live/通常Liveモードがない</li>
+  <li class="todo">12. TTS辞書/読み調整がない → 状況トリガー（読み間違いが目立ったら）</li>
+  <li class="done">13. 初Live/通常Liveモードがない → 不要化（初Live実施済み。以後は前回参照 D-1案2 / E-1 で整合）</li>
   <li class="todo">14. 配信画面/OBSランタイムが未完成</li>
   <li class="todo">15. コメント返しの挿入ポイントがない</li>
+  <li class="todo">21. 配信間の連続性（canon）がない → <a href="#phase-d">Phase D-1</a></li>
+  <li class="todo">22. コメント相互作用の方針が未定義（疑似読みは逆効果） → <a href="#phase-d">Phase D-2</a></li>
+  <li class="todo">23. TTSが平坦（emotion→音声表現マップなし） → <a href="#phase-d">Phase D-3</a></li>
+  <li class="todo">24. ターゲット台本との定量比較指標がない → <a href="#phase-d">Phase D-4</a></li>
 </ul>
+<p class="note">9〜11 は 2026-07-02 のコード照合調査で原因を特定済み。対処は下の「<a href="#vector-db-plan">ベクトルDB活用・雑談品質改善</a>」に具体化した。21〜24 は「文字起こしレベル」到達に必要な残ギャップで、「<a href="#phase-d">Phase D</a>」に複数案で整理した。</p>
 
 <h3><span class="tier tier-b">B級</span> 運用してから強くする</h3>
 <ul class="check">
-  <li class="todo">16. 配信後ログ分析</li>
-  <li class="todo">17. 視聴維持率/コメント率との紐付け</li>
-  <li class="todo">18. memory自動追加</li>
-  <li class="todo">19. 怪談使用履歴管理</li>
-  <li class="todo">20. 毎日自動生成・自動候補提示</li>
+  <li class="todo">16. 配信後ログ分析 → <a href="#phase-e">Phase E-1/E-4</a></li>
+  <li class="todo">17. 視聴維持率/コメント率との紐付け → <a href="#phase-e">Phase E-4</a></li>
+  <li class="todo">18. memory自動追加 → <a href="#phase-e">Phase E-2</a>（人生シミュレータ・承認制）</li>
+  <li class="todo">19. 怪談使用履歴管理 → 怪談 stream_card lite の used_count / last_used_at で対応（Step 3）</li>
+  <li class="todo">20. 毎日自動生成・自動候補提示 → <a href="#phase-e">Phase E</a> 全体</li>
+  <li class="todo">25. 経験が蓄積されない（配信しても何も学ばない） → <a href="#phase-e">Phase E</a></li>
+</ul>
+
+<!-- ───────────── ベクトルDB活用・雑談品質改善 ───────────── -->
+<h2 id="vector-db-plan"><span class="phase-badge badge-active">ACTIVE</span> ベクトルDB活用・雑談品質改善（2026-07-02調査）</h2>
+<p>目標: <code>speech_lines</code> の出力を assets/vtuber台本 の構成（トピック単位の進行 + 視聴者への掛け合い + 熱量の波）に近づける。<br>
+調査の結論: <strong>3層ベクトルDB（flow/topic/style）は実質どれもプロンプトに届いていない</strong>。生成モデルやルールをいじる前に、まず「つなぎ込み」。</p>
+
+<h3>調査で判明した現状（実データ照合）</h3>
+<table>
+<tr><th>データ</th><th>件数</th><th>実態</th></tr>
+<tr><td>flow DB（配信全体構成）</td><td>12</td><td><strong>完全未使用</strong>。<code>retrieveFlow</code> が <code>generate.mjs</code> で import されていない</td></tr>
+<tr><td>topic DB（話題の扱い方）</td><td>219</td><td>検索はされるが <code>decision.topic_hint</code> 止まり。<code>buildPromptByType</code> が読まないため<strong>プロンプトに一切入らない</strong>（DB保存のみ）</td></tr>
+<tr><td>style DB（文体）</td><td>3599</td><td>蒸留カードでなく<strong>生文字起こし行</strong>が入っている。断片化→regexフィルタ→<code>style_fragments=hidden</code> で、実質「定型5種の指示から選ぶ」に縮退</td></tr>
+<tr><td>memory.episode_v2</td><td>343/455</td><td>話し言葉版が生成済みだが <code>loadTalkMemories</code> が <code>episode</code> しか読まず<strong>未使用</strong></td></tr>
+<tr><td>世代不整合</td><td>3世代</td><td>vector-source（6/14 蒸留カード401件）≠ vector-db（6/17 生文字起こし3599件）≠ data/cards（6/26 新カード）。ビルドスクリプトも3系統</td></tr>
+</table>
+
+<p class="note">出力への影響（live 202 で確認）: 番組構成なし / 触覚内省の連続で陰気 / 視聴者への語りかけゼロ / 怪談が講義調。ターゲット台本（フブキ・ぺこら等）の「トピック宣言→近況→布教→締め」「常時コメント掛け合い」と正反対の出力になっている。</p>
+
+<h3>Phase A: つなぎ込み（即効・小改修）</h3>
+<table>
+<tr><th style="width:28px">#</th><th style="width:150px">施策</th><th style="width:170px">変更モジュール</th><th>具体的な変更</th><th>どう効くか</th></tr>
+<tr>
+<td>A1</td>
+<td>topic_hint をプロンプトへ接続</td>
+<td><code>prompt.mjs</code><br><code>generate.mjs</code></td>
+<td><code>buildPromptByType</code> に <code>topic_pattern=</code> フィールドを追加し、topicカードの <code>handling</code>（+<code>steps</code>）を渡す。取得側は実装済み（<code>resolveTopicFlowForMemory</code>）なので渡すだけ。<strong>自由文貼り付けはNG</strong>（過去に別話題混入で撤去済み）。「素材はmemoryのみ。これは話の運び方としてだけ使う」のガード文を必ず添える</td>
+<td>block生成が「何を話すか(memory)」に加えて「どう運ぶか(handling)」を持つ。ターゲット台本の <code>## 構成説明</code> に相当する情報が初めて生成に効く。entry→exitの設計が入り、行き当たりばったりの微遷移が減る</td>
+</tr>
+<tr>
+<td>A2</td>
+<td>episode_v2 を使う</td>
+<td><code>memory.js</code></td>
+<td><code>loadTalkMemories</code> のSELECTに <code>episode_v2</code> を追加し、<code>rowToMemory</code> で <code>episode_v2 || episode</code> を採用（343/455件生成済み、未生成分はフォールバック）</td>
+<td>素材が最初から話し言葉なので、文語→口語変換で崩れる説明文調ブロックが減る。LLMの容量が「変換」でなく「展開」に回る</td>
+</tr>
+<tr>
+<td>A3</td>
+<td>style を蒸留カードで few-shot 表示</td>
+<td><code>scripts/build-vector-db.mjs</code>（実行）<br><code>generate.mjs</code><br><code>prompt.mjs</code></td>
+<td>① <code>node scripts/build-vector-db.mjs</code> で style.sqlite を vector-source/style.jsonl（401件・匿名化済み蒸留カード）に差し替え ② <code>resolveStyle</code> の断片化+regexフィルタ群を撤去し <code>text</code>+<code>move</code> をそのまま返す ③ <code>style_fragments=hidden</code> をやめ「文体見本（内容は拾わない。話し方の動きだけ借りる）」として2〜3件表示</td>
+<td>現状の「定型5種に縮退」が解消され、実物の口調・笑い・語尾の崩しが見本として入る。フィルタで全部落ちて <code>FALLBACK_FEW_SHOT</code> になる事故も消える</td>
+</tr>
+</table>
+
+<h3>Phase B: データ一本化・スキーマ整理</h3>
+<table>
+<tr><th style="width:28px">#</th><th style="width:150px">施策</th><th style="width:170px">変更モジュール</th><th>具体的な変更</th><th>どう効くか</th></tr>
+<tr>
+<td>B4</td>
+<td>vector-db の世代統一 + search_text 修復</td>
+<td><code>work/generate-all-cards.mjs</code><br><code>work/rebuild-vectors.mjs</code><br><code>scripts/build-vector-db.mjs</code></td>
+<td>data/cards の search_text 固定幅スペース破損（「はーいみなさんど うもこんばんはー」）をカード生成側で修正。ビルド入口を <code>scripts/build-vector-db.mjs</code> に一本化し <code>work/embed-and-write-db.mjs</code> は廃止。id/speaker 命名を <code>{type}_{speaker_romaji}_{nnn}</code> に統一</td>
+<td>破損スペースはembeddingのトークン分割を壊す→修復で検索精度が直接上がる。「どのDBがどの世代か」問題が消え、以後のカード改善が確実にDBへ届く</td>
+</tr>
+<tr>
+<td>B5</td>
+<td>スキーマ統一 + quality_flag</td>
+<td>vector-db 3本の data JSON<br><code>vector.mjs</code><br><code>generate.mjs</code></td>
+<td>共通フィールド <code>{id, speaker, db_type, text, tags, search_text, quality_flag}</code> に統一。固有名詞・外国語・破損断片は<strong>ビルド時</strong>に検査して <code>quality_flag=low</code> を付与し、<code>search()</code> で除外。<code>generate.mjs</code> の実行時regex群（<code>STYLE_PROPER_NOUN_RE</code> 等）を削除</td>
+<td>ノイズ除去が「実行のたびregexで捨てる」から「ビルド時に一度だけ」になる。実行時フィルタで検索結果が空になりフォールバックへ落ちる構造的事故が消え、フィルタregexのメンテも不要に</td>
+</tr>
+<tr>
+<td>B6</td>
+<td>memory 使用履歴 + 分類</td>
+<td><code>memory.js</code><br><code>planner.mjs</code><br><code>app/onair/script.js</code></td>
+<td><code>memory</code> に <code>category, mood, people, punchline, use_count, last_used_at, retired, source, happened_at</code> を alter table 追加（既存の補完機構に追随）。<code>savePlanToDb</code> で使用 memory の <code>use_count++</code> / <code>last_used_at</code> 更新。<code>pickMemoryCandidates</code> で直近7日使用分を減点。<code>source</code>（manual | self_stream | life_sim | news | viewer）と <code>happened_at</code> は <a href="#phase-e">Phase E</a> の経験ソース識別の先取り</td>
+<td>usedMemoryIds は生成1回内しか効かないため、毎日配信で同じ記憶が主役化する。使用履歴で日次の新鮮さを確保。category で live 内の題材バランス（食/ゲーム/失敗談）を planner が制御できる</td>
+</tr>
+</table>
+
+<h3>Phase C: 番組構成のテンプレ化（ターゲット構成に寄せる本丸）</h3>
+<table>
+<tr><th style="width:28px">#</th><th style="width:150px">施策</th><th style="width:170px">変更モジュール</th><th>具体的な変更</th><th>どう効くか</th></tr>
+<tr>
+<td>C7</td>
+<td>flow DB → 番組構成テンプレ</td>
+<td><code>generate.mjs</code><br><code>director.mjs</code><br><code>vector.mjs</code><br><code>app/onair/script.js</code></td>
+<td><code>retrieveFlow</code> を generate.mjs で使用開始。生成冒頭で flow を1本選び <code>sections[]</code> を「今日の番組表」として保持。<code>planNextBlocks</code> のプロンプトに現在セクション（OP/近況/メイン/ED）とその役割を渡す。<code>speech_lines</code> に <code>section</code>, <code>topic_title</code> カラム追加（既存 alter 機構で）</td>
+<td>ターゲット台本の「<code># トピック</code> → <code>## 構成説明</code>」構造が再現される。1トピック=数ブロックのまとまりが生まれ、微遷移の連鎖から脱却。ダッシュボード/字幕のセクション表示にも流用できる</td>
+</tr>
+<tr>
+<td>C8</td>
+<td>視聴者への語りかけ必須化</td>
+<td><code>prompt.mjs</code><br><code>director.mjs</code><br><code>inspector.mjs</code></td>
+<td>prompt に「1トピックに1回以上、視聴者への問いかけ（みんなは〜？/〜な人いる？/コメントで教えて）を入れる」を追加。トピック先頭ブロックは <code>listener_shadow</code> を必須化（現状は約30%の確率任せ）。inspector に問いかけゼロのトピック検出を追加。問いかけは<strong>返事を待たず自分で答える形</strong>にし、存在しないコメントを読む演出はしない（→ <a href="#phase-d">Phase D-2</a>）</td>
+<td>閉じた独白→配信の体裁へ。ターゲット台本で最頻出の「コメント掛け合い」形に近づく最大要素。将来のコメント返し（Phase 5）の挿入ポイントにもなる</td>
+</tr>
+<tr>
+<td>C9</td>
+<td>トーン再配分</td>
+<td><code>director.mjs</code><br><code>prompt.mjs</code><br><code>state.mjs</code></td>
+<td><code>freshAngleSlot</code> の fallback 順で BODY_FEEL / MICRO_CONFLICT / UNNECESSARY_DETAIL を後方へ、PERSON_REACTION を前方へ。「感覚→行動変換ルール」の必須回数（小さい行動3回以上+自己ツッコミ1回以上）を各1回に緩和。<code>tension</code> 固定50をやめ flow セクション連動（OP=60 / メイン=75 / ED=40）</td>
+<td>live 202 で確認した「触覚内省が連続して陰気」問題の解消。布教で上がり締めで落ちる熱量の波が出て、ターゲットのテンション構造に近づく</td>
+</tr>
+</table>
+
+<h3>優先順位と効果測定</h3>
+<div class="arch-box">
+<pre style="margin:0;border:none;background:transparent;padding:0"><code>A1 (topic接続) → A2 (episode_v2) → A3 (style few-shot)   ← 各1日以内・コード数行〜数十行
+    ↓
+B6 (memory使用履歴)   ← 毎日配信の重複対策に直結
+    ↓
+C7 (flow番組構成) → C8 (語りかけ) → C9 (トーン)   ← 構成面の本丸
+    ↓
+B4/B5 (世代統一・スキーマ)   ← C系と並行可。カード再生成を伴うため時間はかかる</code></pre>
+</div>
+<ul class="check">
+  <li class="todo">A1: topic_pattern をプロンプト接続</li>
+  <li class="todo">A2: episode_v2 を loadTalkMemories で採用</li>
+  <li class="todo">A3: style.sqlite 蒸留カード化 + few-shot 表示</li>
+  <li class="todo">B4: vector-db 世代統一 + search_text 修復</li>
+  <li class="todo">B5: スキーマ統一 + quality_flag（実行時regex撤去）</li>
+  <li class="todo">B6: memory に use_count / last_used_at / category</li>
+  <li class="todo">C7: flow sections を director に供給 + speech_lines に section/topic_title</li>
+  <li class="todo">C8: 視聴者問いかけの必須化 + inspector 検出</li>
+  <li class="todo">C9: angle_slot 配分と tension のセクション連動</li>
+</ul>
+<p class="note">効果測定: 既存の <code>live.eval_depth / eval_flow / eval_naturalness / eval_grounding / eval_repetition</code> で before/after を比較。A系適用後は eval_naturalness・eval_flow、C系適用後はターゲット台本との構成目視比較（トピック単位の有無・問いかけ回数・angle_slot 分布）。定量比較は <a href="#phase-d">D-4案1</a> の分布メトリクスで行う。<strong>全体の実施順は「依存関係と優先順位（2026-07-02 引き直し）」が正</strong>。</p>
+
+<!-- ───────────── データ整備手順 ───────────── -->
+<h2 id="data-maintenance"><span class="phase-badge badge-active">運用</span> データ整備手順（memory / vector DB への今後の追加方法）</h2>
+<p>上の Phase A〜C を入れても、素材が増えなければ品質は頭打ちになる。ここでは「新しいデータをどこから取り、どう加工し、どこへ入れるか」を標準手順として固定する。</p>
+
+<div class="arch-box">
+<pre style="margin:0;border:none;background:transparent;padding:0"><code>【memory 系】 ネタの種 (実生活/季節/台本翻案)
+                 → LLM整形プロンプト (episode + episode_v2 + 分類カラム同時生成)
+                 → data/memory-source/*.json → scripts/add-memories.mjs (append) → memory テーブル
+
+【vector 系】  配信文字起こし (YouTube字幕 / Whisper)
+                 → 整形プロンプト (# トピック / ## 構成説明 形式のmd化) → assets/vtuber台本/*.md
+                 → 蒸留プロンプト×3 (style / topic / flow カード化)
+                 → data/cards/*.jsonl → scripts/build-vector-db.mjs (embed) → data/vector-db/*.sqlite</code></pre>
+</div>
+<p class="note">現状の問題: memory追加は手順が repo に存在しない（<code>replaceTalkMemoriesFromJsonFiles</code> は呼び出し元なし・全置換で危険）。vector系は蒸留済みJSONの置き場 <code>assets/vtuber台本/{名前}/話し方.json</code> が消失しており、<code>consolidate-vector-source.mjs</code> は現在動かない。以後は上図の経路に一本化する。</p>
+
+<h3>memory の追加手順</h3>
+<table>
+<tr><th style="width:110px">ステップ</th><th>内容</th></tr>
+<tr><td>1. ネタ出し</td><td>ネタ元は3系統。(a) 日常の出来事を ZIPちゃん設定に翻案（実在人物は出さない。チェーン店・商品名はOK、布教の熱量になる） (b) ターゲット台本のトピック構造の翻案（内容コピーはNG、「布教」「企画振り返り」等の型だけ借りる） (c) 季節・イベント（正月、花見、新作ゲーム）。1回あたり10〜20件を目安にネタの種を作る。種は<strong>「状況+具体物」まで書くと安定</strong>（「コンビニの話」ではなく「雨上がりの夜にコンビニでビニール傘を2本目買った」）</td></tr>
+<tr><td>2. LLM整形</td><td>下の「memory生成プロンプト」に種を1件ずつ渡し、<strong>B6の新カラムまで一度に埋めた</strong>JSONを得る。episode（事実文）と episode_v2（話し言葉）を同時生成するので後工程が不要</td></tr>
+<tr><td>3. 投入</td><td>JSON配列を <code>data/memory-source/YYYYMMDD.json</code> に保存し、<code>scripts/add-memories.mjs</code>（新設・<strong>append専用</strong>）で挿入。<code>replaceTalkMemoriesFromJsonFiles</code> は全置換のため使わない（廃止対象）</td></tr>
+<tr><td>4. 検証</td><td>投入後に <code>keywords重複チェック</code>（既存とのコサイン類似 or キーワード一致で疑似重複を警告）。既存455件へのバッチ適用も同じプロンプトでできる: episode を種として渡し、<strong>習慣形（「〜することがある」）を一回きりの断片記憶に書き直し</strong> + episode_v2 未生成分（112件）+ 新カラム後付けを一度に処理する</td></tr>
+</table>
+
+<p><strong>memory生成プロンプト（テンプレ）</strong> — 種1件 → memory 1件。<br>
+ポイント: JSONを一発で書かせると習慣形の一般論（「〜することがある」）に寄る。<strong>先に「一回きりの出来事」のディテールを固めさせてから</strong> episode を書かせる。</p>
+<pre><code>あなたは配信者「ZIPちゃん」の記憶を作る。目的は、本人しか知らない一回きりの断片記憶。
+実在の人物・配信者の出来事は使わない。店名・商品名・値段は実在のものを使ってよい。
+
+ネタの種: {{seed}}    （例: コンビニで新作スイーツを買って冷蔵庫で忘れた）
+
+手順（1〜4を考えてから、最後にJSONだけを出力する）:
+1. この出来事が起きた「一回」を決める: 曜日・時間帯・天気・直前に何をしていたか
+2. 断片ディテールを8個列挙する: 値段/個数/棚の位置/音/匂い/手の動き/他の客/店員の様子
+3. そのうち「本筋と関係ないのに妙に覚えていること」を1つ選ぶ
+4. 「思い出せない部分」を1つ決める（なんでそうしたのか・その後どうしたか等）
+
+出力形式:
+{
+  "keywords": ["…", "…"],            // 検索用 2〜4語
+  "episode": "…",                     // 一回きりの出来事として3〜5文。数字(値段/時刻/個数)を
+                                      //   最低1つ、五感の断片を最低1つ入れる
+  "episode_v2": "…",                  // 同じ内容をZIPちゃんの一人称の話し言葉で3〜5文
+  "category": "food|game|fail|discovery|outing|goods|health|season",
+  "mood": "布教|笑い話|しみじみ|グチ|発見",
+  "people": ["店員さん"],             // 登場人物。いなければ []
+  "punchline": "…",                   // この話のオチ・一番おいしい所を1文
+  "objects": ["…"],                   // 位置・状態つきの具体物 2〜4個（レジ横の棚に2個だけ残ってたプリン）
+  "actions": ["…"],                   // 小さい行動 2〜3個（値札を二度見した、袋を持ち直した）
+  "micro_conflicts": ["…"],           // 小さい矛盾・違和感 0〜2個（買ったのに食べてない）
+  "odd_detail": "…",                  // 本筋と関係ないのに覚えていること1つ（手順3）
+  "unclear": "…"                      // 思い出せない部分1つ（手順4）
+}
+
+条件:
+- 「〜することがある」「よく〜する」の習慣形は禁止。その日一回の出来事として書く
+- 抽象語（感覚・違和感・空気感・現実感）で説明しない。物と行動と数字で書く
+- きれいなオチをつけすぎない。人の記憶は途中で終わってよい
+- episode_v2 は「〜なんだよね」「〜しちゃってさ」等の配信口調。顔文字・記号は使わない
+
+悪い例（習慣形・抽象的）:
+「コンビニで新作スイーツを買った。冷蔵庫に入れて忘れることがある。夜中に思い出して食べた。」
+
+良い例（断片記憶）:
+「火曜の23時ごろ、雨上がりにファミマに寄った。新作の生カスタードプリンがレジ横の棚に
+2個だけ残ってて、なぜか2個とも買った。前の客がホットスナックを3種類買ってて、袋に
+揚げ物の匂いが移った気がした。1個はその日に食べて、もう1個は冷蔵庫の奥で金曜まで
+忘れてた。なんで2個買ったのかは覚えてない。」</code></pre>
+<p class="note">分類カラム（category/mood/punchline/people）は B6、atoms（objects/actions/micro_conflicts）は Phase 3 の先取り。<code>odd_detail</code> は生成側の UNNECESSARY_DETAIL angle、<code>unclear</code> は lost_thread / self_question の素材にそのまま使える。カラムが未追加の間は無視されるだけなので、<strong>データ側を先にこの形式へ揃えてよい</strong>。</p>
+
+<h3>vector DB の追加手順</h3>
+<table>
+<tr><th style="width:60px">対象</th><th style="width:190px">取得元</th><th>加工方法</th><th style="width:170px">追加先</th></tr>
+<tr>
+<td>台本md</td>
+<td>YouTube配信の文字起こし（字幕DL or Whisper）</td>
+<td>下の「台本整形プロンプト」で <code># トピック / ## 構成説明 / 本文行</code> 形式に整形。雑談配信・怪談配信・布教回など<strong>構成の型が違う配信を優先して増やす</strong>（同じ型を増やしても flow の多様性が出ない）</td>
+<td><code>assets/vtuber台本/{名前}.md</code>（gitignore済み）</td>
+</tr>
+<tr>
+<td>style</td>
+<td>台本mdの本文行</td>
+<td>「style蒸留プロンプト」で<strong>匿名化した文体カード</strong>に変換（1トピックから3〜8枚）。固有名詞の除去・誤変換除外はこの段階でやる（B5: 実行時regexでなくビルド時に）</td>
+<td><code>data/cards/style_{speaker}.jsonl</code></td>
+</tr>
+<tr>
+<td>topic</td>
+<td>台本mdの <code>#</code>+<code>##</code>+本文</td>
+<td>「topic蒸留プロンプト」で話題の運び方カード1枚/トピック。<strong>内輪ネタは構造だけ残して一般化</strong>（花ソーセージ布教→地元食品の布教）</td>
+<td><code>data/cards/topic_{speaker}.jsonl</code></td>
+</tr>
+<tr>
+<td>flow</td>
+<td>台本md全体のトピック列</td>
+<td>「flow蒸留プロンプト」で配信構成カード1枚/配信。sections[] に order/name/role/flow を持たせる（C7 でdirectorに渡す形）</td>
+<td><code>data/cards/flow_{speaker}.jsonl</code></td>
+</tr>
+<tr>
+<td>embed</td>
+<td>data/cards/*.jsonl</td>
+<td><code>scripts/build-vector-db.mjs</code> を data/cards 読みに改修（B4）して再embed。search_text は<strong>単語間スペースのみ</strong>（現行cardsの固定幅スペース破損を修正）。quality_flag はここで検査・付与（B5）</td>
+<td><code>data/vector-db/*.sqlite</code></td>
+</tr>
+</table>
+
+<p><strong>台本整形プロンプト（文字起こし→md）</strong></p>
+<pre><code>以下はVTuber配信の文字起こし。配信の話題の切れ目でトピックに分割し、次の形式のmarkdownにする。
+
+# トピックタイトル（15字以内。何の話か）
+## この話題の構成説明（どう入り、どう展開し、どう抜けるかを1文で）
+本文行…（元の発話をほぼそのまま。1段落=1呼吸。フィラーや笑いは残す）
+
+条件:
+- 発話の中身を書き換えない・要約しない（蒸留は後工程でやる）
+- 挨拶〜締めまで全体を含める（flow抽出に使うため）
+- 誤字起こしが明らかな行だけ [?] を付ける</code></pre>
+
+<p><strong>style蒸留プロンプト（本文行→文体カード）</strong></p>
+<pre><code>以下は配信文字起こしの1トピック分。「何の話か」ではなく「どう話しているか」を抽出し、
+文体カードを3〜8枚、JSONL（1行1カード）で出力する。
+
+入力: topic={{topic_title}} / handling={{handling}} / 本文={{lines}}
+
+{"id":"style_{{speaker_romaji}}_{{連番3桁}}","speaker":"{{speaker_romaji}}","db_type":"style",
+ "text":"…","move":"…","tags":["…"],"search_text":"…"}
+
+条件:
+- text: 固有名詞を一般化した例文20〜60字（フレア→友達、REPO→いつものゲーム）。話し言葉のまま
+- move: その文がやっている動き（例: 言いかけて戻る / 布教の熱を一段上げる / 視聴者に問いかける / 記憶を疑いながら話す）
+- 挨拶定型・コメント読み上げのみの行・誤変換や文字化けを含む行は採用しない
+- search_text は text+move+tags を単語間の半角スペースだけで連結（文字間スペース挿入は禁止）</code></pre>
+
+<p><strong>topic蒸留プロンプト（1トピック→運び方カード）</strong></p>
+<pre><code>以下の1トピック分の文字起こしから「話題の運び方」カードを1枚、JSONで出力する。
+内容は一般化し、進行の構造だけを残す。
+
+{"id":"topic_{{speaker_romaji}}_{{連番4桁}}","speaker":"{{speaker_romaji}}","db_type":"topic",
+ "topic":"…",            // 一般化した話題名（花ソーセージ布教 → 地元食品の布教）
+ "title":"…",            // この運び方の名前（見つけた食べ物を熱量高く布教する）
+ "handling":"…",         // どう運ぶか1〜2文
+ "steps":["…"],          // 3〜6手順（出会いを話す→味を具体で説明→思い出に接続→視聴者へ勧める）
+ "entry":"…","exit":"…", // 入り方と抜け方
+ "tags":["…"],"search_text":"…"}
+
+条件: 人名・番組名・内輪ネタは役割語に置換。構造が同じカードが既にあるなら出力しない（重複回避）</code></pre>
+
+<p><strong>flow蒸留プロンプト（配信1本→構成カード）</strong></p>
+<pre><code>以下は配信1本分のトピック一覧（# と ## のみ）。配信全体の構成カードを1枚、JSONで出力する。
+
+{"id":"flow_{{speaker_romaji}}_{{連番3桁}}","speaker":"{{speaker_romaji}}","db_type":"flow",
+ "title":"…型",           // 構成の型名（帰宅報告→企画振り返り→布教→締め型）
+ "summary":"…",           // 全体の流れを2〜3文
+ "entry":"…","exit":"…",
+ "sections":[{"order":1,"name":"…","role":"…","flow":["…"],"tags":["…"]}],
+ "tags":["…"],"search_text":"…"}
+
+条件: sections は4〜8個。role は「この位置で何をする区間か」（例: 配信の空気を作る / メイン話題へ熱を上げる / 締めへ向けて温度を下げる）。C7 でこの sections[] がそのまま director への番組表になる</code></pre>
+
+<h3>運用サイクル</h3>
+<ul class="check">
+  <li class="todo"><code>scripts/add-memories.mjs</code>（append専用 + 疑似重複警告）を新設</li>
+  <li class="todo"><code>scripts/build-vector-db.mjs</code> を data/cards 読みに一本化（B4と同時）</li>
+  <li class="todo">memory: 週1回 or ネタ切れ時に10〜20件追加（生成時に category の偏りを見る）。<a href="#phase-e">Phase E-2</a>（人生シミュレータ）稼働後は日次自動生成+承認に移行し、手動は補充のみ</li>
+  <li class="todo">台本md: 月1〜2本、構成の型が違う配信を選んで追加 → 蒸留 → 再embed</li>
+  <li class="todo">配信後: 評価の良かった live の言い回しを style カードへ還流（<a href="#phase-e">Phase E-4</a> の②で自動抽出+月次選別に発展）</li>
+</ul>
+<p class="note">蒸留・整形プロンプトの実行は精度が品質に直結するため、ローカルの生成用MoEモデルではなく<strong>強いモデル（Claude等）でのバッチ実行を推奨</strong>。embedはローカル nomic-embed-text のままでよい。</p>
+
+<!-- ───────────── Phase D: 生きてる感 ───────────── -->
+<h2 id="phase-d"><span class="phase-badge badge-future">TODO</span> Phase D: 生きてる感 — 文字起こしレベルへの残ギャップ</h2>
+<p>Phase A〜C + データ整備で到達するのは<strong>「破綻のない雑談台本」＝目標の6〜7割</strong>。ターゲット台本と並べて1〜2分で見分けがつかないレベルへ進むには、以下4つの構造ギャップを埋める必要がある。</p>
+
+<div class="arch-box">
+<p style="margin:0;font-size:13px;"><strong>目標の再定義</strong>: 実況の「乱れ」はライブ相互作用の結果なので、乱れだけ完コピした台本をTTSが読むと「原因のない混沌」になり逆に不気味になる。狙うのは完全な文字起こし再現ではなく、<strong>台本は文字起こし7割の乱れ + 音声表現 + （視聴者が付いたら）本物のコメント反応</strong> の合成。</p>
+</div>
+
+<table>
+<tr><th>ギャップ</th><th>何が起きるか</th><th>重要度</th></tr>
+<tr><td>D-1 世界の持続性がない</td><td>memory 455件がバラバラの点。「昨日の続き」「いつもの友達」「今ハマってるもの」という配信間の連続性がなく、毎回初対面の人の話に聞こえる</td><td><span class="tier tier-s">必須</span></td></tr>
+<tr><td>D-2 コメント方針が未定義</td><td>ターゲット台本の3〜5割はコメント反応。ただし同接0〜2人で存在しないコメントを読むフリは逆効果（バレる）</td><td><span class="tier tier-a">方針転換</span></td></tr>
+<tr><td>D-3 TTSが平坦</td><td>完璧な台本でも一定リズムで読めば朗読になる。笑い・ため・早口・声量の波が音声側にない</td><td><span class="tier tier-s">必須</span></td></tr>
+<tr><td>D-4 物差しがない</td><td>evalカラムは全NULL。目視の印象で進むと「近づいてるか」が分からず迷走する</td><td><span class="tier tier-b">舵取り</span></td></tr>
+</table>
+
+<h3>D-1: 世界の持続性（canon）</h3>
+<table>
+<tr><th style="width:28px">案</th><th style="width:160px">具体案</th><th>内容</th><th style="width:150px">変更モジュール</th><th style="width:180px">向き・トレードオフ</th></tr>
+<tr>
+<td>1</td>
+<td><strong>canonテーブル</strong>（本命）</td>
+<td><code>canon</code> テーブル新設: <code>{kind(person|arc|favorite|ritual), name, description, status(active|dormant|ended), last_mentioned_at, mention_count}</code>。例: person「よく一緒にゲームする友達」/ arc「今月ハマってるパズルゲーム」/ ritual「配信前のコンビニ寄り道」。planner が active な canon を2〜3件 memory 候補と一緒に director へ渡し、1配信1〜2回の言及ブロックを混ぜる。配信後に <code>last_mentioned_at</code> 更新。数配信触れない arc は「そういえばあれどうなったっけ」回収ネタへ変換</td>
+<td><code>memory.js</code>（テーブル）<br><code>planner.mjs</code><br><code>director.mjs</code><br><code>script.js</code>（使用記録）</td>
+<td>人格の芯になる。少数（5〜10件）から始められる。canon設計と鮮度管理の運用が発生</td>
+</tr>
+<tr>
+<td>2</td>
+<td><strong>前回配信参照</strong>（軽量・即効）</td>
+<td>テーブル追加なし。生成開始時に前回 live の speech_lines から「主要トピック3つ + 締めの一言」を抽出し、OP プロンプトに「前回話したこと」として渡す。「昨日の◯◯の続きなんだけどさ」が自然に出る</td>
+<td><code>generate.mjs</code>（OP部のみ）</td>
+<td>実装数時間で連続性の効果を確認できる。人物・長期arcは生まれず、連続性は1配信分だけ</td>
+</tr>
+<tr>
+<td>3</td>
+<td><strong>memory arc連結</strong></td>
+<td>memory に <code>arc_id</code> を追加し、同一 arc の記憶を時系列で連鎖（プリン買った→また買った→冷蔵庫で3個目発見）。断片記憶生成プロンプトに「既存arcの続きを書く」モードを追加</td>
+<td><code>memory.js</code><br>memory生成プロンプト</td>
+<td>既存構造の延長で入れやすい。canonほど「人格」にはならない（出来事の連続のみ）</td>
+</tr>
+</table>
+<p class="note">推奨: <strong>案2を先に入れて効果確認 → 案1が本命 → 案3はデータ整備の延長で並行</strong>。案1のkind=personは実在VTuberを想起させない完全創作キャラにする（コラボ実在性の偽装はしない）。</p>
+
+<p><strong>D-1 実装詳細</strong></p>
+<pre><code>-- canon スキーマ（talk-items.sqlite に追加）
+create table if not exists canon (
+  id integer primary key autoincrement,
+  kind text not null,              -- person | arc | favorite | ritual | place
+  name text not null,              -- 呼び名。台本にそのまま出る
+  description text not null,       -- 変わらない設定 1〜3文
+  state text,                      -- 今どうなってるか（arc の進行状態。更新される）
+  status text not null default 'active',   -- active | dormant | ended
+  mention_count integer not null default 0,
+  last_mentioned_at text,
+  created_at text not null default current_timestamp
+);</code></pre>
+
+<p>初期canonセット案（この8件から開始。増やすのは月2〜3件まで）:</p>
+<table>
+<tr><th style="width:70px">kind</th><th style="width:140px">name</th><th>description / state</th></tr>
+<tr><td>person</td><td>ミカ</td><td>高校からの友達。ゲームの趣味が合う。ZIPちゃんより行動力がある。月2回くらい遊ぶ</td></tr>
+<tr><td>person</td><td>お母さん</td><td>実家。たまに野菜が届く。電話が長い</td></tr>
+<tr><td>place</td><td>駅前のドトール</td><td>作業する定位置。窓際の席が空いてると当たりの日</td></tr>
+<tr><td>favorite</td><td>コンビニ新作スイーツ巡回</td><td>火曜に新商品をチェックする習慣</td></tr>
+<tr><td>arc</td><td>今月ハマってるパズルゲーム</td><td>state: ステージ40で詰まってる</td></tr>
+<tr><td>arc</td><td>部屋の模様替え計画</td><td>state: 棚だけ買って3週間組み立ててない</td></tr>
+<tr><td>ritual</td><td>配信前の炭酸水</td><td>1本開けてから枠を立てる</td></tr>
+<tr><td>ritual</td><td>寝る前の漫画1話だけ</td><td>のつもりが気づくと3時</td></tr>
+</table>
+
+<p>planner への渡し方（<code>buildPlannerPrompt</code> に追加するブロック）:</p>
+<pre><code>canon（続いている世界。矛盾させない）:
+- [person] ミカ: 高校からの友達。ゲームの趣味が合う。(前回言及: 3日前)
+- [arc] 今月のパズルゲーム: ステージ40で詰まってる (前回言及: 昨日)
+- [ritual] 配信前の炭酸水 (前回言及: 7日前)
+
+指示:
+- 1配信で1〜2ブロック、canonに自然に触れる（触れないブロックが多数派でよい）
+- arc に触れたら state の変化を一言入れる（進んだ / 変わらない / 忘れてた）
+- canon の description と矛盾する設定を新しく作らない</code></pre>
+
+<ul class="check">
+  <li class="todo">鮮度管理: 言及時に <code>mention_count++</code> / <code>last_mentioned_at</code> 更新（<code>script.js</code> の保存時に台本テキストと canon.name の一致で検出）</li>
+  <li class="todo">14日言及なしの arc → dormant。dormant は月1回「そういえばあれどうなったっけ」回収候補として1件だけ浮上</li>
+  <li class="todo">arc の state 更新は<strong>手動から始める</strong>（生成台本の内容で自動更新すると幻覚が世界設定に混入する）</li>
+  <li class="todo">矛盾検出はやらない（コスト高）。description を毎回プロンプトに入れる予防のみ</li>
+</ul>
+
+<p>案2（前回配信参照）の抽出プロンプト:</p>
+<pre><code>以下は前回配信の台本。次回配信のOPで「前回の続き」として軽く触れられる要素を抽出し、JSONだけを出力する。
+
+{"topics": ["主要トピック3つ（短く）"],
+ "closing": "締めで言ったこと1文",
+ "unfinished": "言いかけて終わった話・宿題にした話があれば1つ（なければ null）"}
+
+unfinished があれば OP で最優先に拾う（「そういえば昨日言ってたあれね」が一番自然な連続性になる）。</code></pre>
+
+<h3>D-2: コメント相互作用の方針</h3>
+<table>
+<tr><th style="width:28px">案</th><th style="width:160px">具体案</th><th>内容</th><th style="width:150px">変更モジュール</th><th style="width:180px">向き・トレードオフ</th></tr>
+<tr>
+<td>1</td>
+<td><strong>独り言スタイルに振り切る</strong>（同接0〜5の今）</td>
+<td>存在しないコメントを読む演出を禁止。問いかけは<strong>返事を待たず自分で答える型</strong>に統一（「〜な人いる？ …いや、いないか。私だけか」）。C8 の問いかけルールをこの形に修正</td>
+<td><code>prompt.mjs</code>（文言のみ）</td>
+<td>嘘がなく今日から入れられる。賑わい感は出ない（それでいい段階）</td>
+</tr>
+<tr>
+<td>2</td>
+<td><strong>リアルコメント割り込み</strong>（Phase 5 の前倒しミニマム版）</td>
+<td>YouTube Live Chat API をポーリングし、コメント到着時に次のブロック境界で「本物のコメント読み」ブロックをLLMで即時生成（1〜3文 + 元の話へ復帰）。broadcast queue の <code>can_interrupt_after</code> を実装。フィルタはNGワード+文字数制限の最小構成で開始</td>
+<td><code>radio.js</code>（割り込みスロット）<br><code>server.js</code>（chat poller）<br>返答プロンプト1本</td>
+<td>雑談配信の本体が手に入る。リアルタイムLLM推論の安定性が必要で実装量は大きい</td>
+</tr>
+<tr>
+<td>3</td>
+<td><strong>同接しきい値ハイブリッド</strong></td>
+<td>台本に「コメント枠ブロック」をスキップ可能フラグ付きで入れておき、実コメントが無ければ自動スキップ、あれば案2の即時生成に差し替え。配信の型（flow）側にコメント枠の位置を持たせる</td>
+<td>flowテンプレ<br><code>radio.js</code>（スキップ処理）</td>
+<td>案2の運用形。台本がコメント有無で破綻しない。フラグ設計が少し複雑</td>
+</tr>
+</table>
+<p class="note">推奨: <strong>案1は今日から。初コメントが付き始めた時点で案2を最優先に昇格</strong>（コメント返しは「最後のおまけ」ではなく雑談配信の本体）。案3は案2が安定してからの統合形。</p>
+
+<p><strong>D-2 実装詳細</strong></p>
+<p>案1: <code>prompt.mjs</code> に入れる文言（C8 の問いかけルールをこの形に差し替え）:</p>
+<pre><code>- 視聴者への問いかけは「〜な人いる？」「みんなどう？」まで言ってよい。
+  ただしコメントを読んだフリ（「あ、コメントで〜って来てる」「〜って言ってる人いるね」）は書かない。
+- 問いかけの後は返事を待たず、自分で答えて進める。
+  例: 「これ分かる人いる？ …いや、いないか。私だけか。」
+  例: 「みんな夜型？ まあ聞いといてあれだけど、私は完全に夜型です。」
+- 「コメントで教えて」は配信の最後（ED）に1回だけ使ってよい。</code></pre>
+
+<p>案2: 構成とフェイルセーフ:</p>
+<pre><code>server.js:
+  chatPoller を追加。YouTube Data API liveChatMessages.list を 8〜10秒間隔でポーリング
+  （read系でクォータ消費は小さいが、コメントが無い時間帯は間隔を自動で 30秒まで広げる）
+  新着コメントは broadcastState.commentQueue に積む
+
+radio.js:
+  各行の再生完了時に commentQueue をチェック → あれば割り込み生成へ
+  割り込み生成が3秒以内に返らなければスキップして本編続行（配信を絶対に止めない）
+  割り込みは 5分間に最大2回（本筋を乗っ取らせない）
+
+最小フィルタ（この4つだけで開始）:
+  NGワードリスト一致 → 無視 / 50文字超 → 無視 / URL含み → 無視 / 同一ユーザー連投 → 最新のみ</code></pre>
+
+<p>案2: 割り込み返答プロンプト:</p>
+<pre><code>配信中にコメントが来た。今の話を1文で受けて、コメントに1〜2文で反応し、元の話に戻る一言で締める。
+全体で3文以内。
+
+今の話（直前の台本末尾）: {{lastLines}}
+コメント: {{author}}「{{text}}」
+
+条件:
+- 名前は「さん」付けで1回だけ呼ぶ
+- 個人情報・住所・体調・センシティブな内容には具体的に触れず「ありがとう」系で流す
+- コメントの内容を復唱しすぎない（全文読み上げは禁止。要点だけ拾う）
+- 元の話への戻り文は「で、さっきの話なんだけど」程度に短く</code></pre>
+
+<h3>D-3: TTS表現力（Irodori: ref_wav参照方式 + duration_scale）</h3>
+<table>
+<tr><th style="width:28px">案</th><th style="width:160px">具体案</th><th>内容</th><th style="width:150px">変更モジュール</th><th style="width:180px">向き・トレードオフ</th></tr>
+<tr>
+<td>1</td>
+<td><strong>emotion→参照音声切替</strong></td>
+<td>テンション別の参照音声を3〜5本用意（normal / excited / calm / tired）し、speech_lines の <code>emotion</code>（item-builder が保存済み）から <code>ref_wav</code> を切替。あわせて <code>duration_scale</code> をマップ（excited=0.92速め / しみじみ=1.15遅め）。<code>synthesize()</code> を per-call で ref_wav / duration_scale を受けられるよう変更（現在コンストラクタ固定）</td>
+<td><code>tts.js</code><br><code>radio.js</code>（emotion引き渡し）</td>
+<td>コードだけで完結、効果大。参照音声の準備（既存ref音源から感情別に切り出し）が必要</td>
+</tr>
+<tr>
+<td>2</td>
+<td><strong>笑い・相槌の実録挿入</strong></td>
+<td>台本中の「(笑)」「ははは」をTTSに読ませず、実録の笑いwav（数種ローテーション）に置換して再生列に挟む。<code>radio.js</code> の queue を text→[speech.wav, laugh_02.wav, speech2.wav] に分解</td>
+<td><code>radio.js</code><br>笑い素材の録音</td>
+<td>笑いは合成が最も不自然な要素なので実録の効果が大きい。素材準備が前提</td>
+</tr>
+<tr>
+<td>3</td>
+<td><strong>文単位の緩急+間</strong></td>
+<td><code>splitSpeechText</code> を句点単位に分割し、文長から duration_scale を自動変調（短文=遅め・ぽつり / 長文=速め・一気）。文間ポーズを 0.3〜1.2s のランダムで挿入</td>
+<td><code>tts.js</code>（splitSpeechText）<br><code>radio.js</code>（再生間隔）</td>
+<td>「一定リズムの朗読感」への直撃。合成リクエスト数が増える（キュー生成時間に注意）</td>
+</tr>
+</table>
+<p class="note">推奨: <strong>案1+案3を先行</strong>（コード側で完結）。案2は笑い素材が録れ次第。台本改善を7割で止めてでもD-3に投資する価値がある（「雑談に聞こえる」への寄与が大きい）。</p>
+
+<p><strong>D-3 実装詳細</strong></p>
+<p>emotion→パラメータマップ（<code>constants.mjs</code> の EMOTIONS 7種に対応。tts.js に変換テーブルとして持つ）:</p>
+<table>
+<tr><th style="width:100px">emotion</th><th style="width:130px">参照音声</th><th style="width:120px">duration_scale</th><th>使いどころ</th></tr>
+<tr><td>casual</td><td>normal</td><td>1.05（現行値）</td><td>基本。地の雑談</td></tr>
+<tr><td>amused</td><td>excited</td><td>0.97</td><td>笑い話・軽いツッコミ</td></tr>
+<tr><td>excited</td><td>excited</td><td>0.90</td><td>布教・テンションピーク</td></tr>
+<tr><td>nostalgic</td><td>calm</td><td>1.12</td><td>思い出・しみじみ</td></tr>
+<tr><td>uneasy</td><td>calm</td><td>1.10</td><td>怪談MAIN（声を落とす）</td></tr>
+<tr><td>calm</td><td>calm</td><td>1.08</td><td>OP後半・話の谷間</td></tr>
+<tr><td>tired</td><td>tired</td><td>1.15</td><td>ED・ぼやき</td></tr>
+</table>
+<ul class="check">
+  <li class="todo">参照音声は4本（normal / excited / calm / tired）から開始。元音源からテンションの違う区間を10〜20秒ずつ切り出す</li>
+  <li class="todo"><strong>ref_latent の事前計算</strong>: <code>IrodoriWorkerClient</code> は <code>ref_latent</code> を既にサポート済み。感情別 ref のlatentを一度だけ計算して <code>data/tts-refs/{emotion}.latent</code> に保存し、切替は ref_latent 指定で行う（ref_wav 切替のたびの再計算を回避）</li>
+  <li class="todo"><code>synthesize(text, { refLatent, durationScale })</code> の per-call 対応（現在はコンストラクタ固定）</li>
+  <li class="todo">元音源に感情差のある区間が無い場合は、まず duration_scale 変調だけ入れる（それだけでも朗読感は減る）</li>
+</ul>
+
+<p>案3: 文単位の緩急ルール（<code>splitSpeechText</code> を句点単位に変更した上で）:</p>
+<pre><code>duration_scale = clamp(1.18 - 0.0012 × 文の文字数, 0.92, 1.18) + random(±0.03)
+  → 20字未満の短文 = 1.15 固定（「まじで。」をぽつりと言う）
+  → 100字超の一気話 = 0.95 前後（畳みかける）
+
+文間ポーズ:
+  基本 0.35s / 段落末 0.8s / 「…」で終わる文 1.2s / 問いかけ「？」の後 0.9s（自答の間）
+
+emotion のマップ値と文長変調は乗算で合成する（excited の長文 = 0.90 × 0.95 ≈ 0.85 が下限クリップ）</code></pre>
+
+<p>案2: 笑い素材の運用:</p>
+<pre><code>台本の「(笑)」「ははは」「ふふっ」を検出 → data/tts-assets/laughs/laugh_01..05.wav からランダム選択
+音量は直前の台詞の -3dB に正規化 / 同じ笑いwavを2回連続で使わない
+素材が録れるまでの中間案: 笑い部分だけ excited ref で別合成して差し込む（完全な実録より劣るが平坦よりまし）</code></pre>
+
+<h3>D-4: 定量評価（ターゲット分布比較）</h3>
+<table>
+<tr><th style="width:28px">案</th><th style="width:160px">具体案</th><th>内容</th><th style="width:150px">変更モジュール</th><th style="width:180px">向き・トレードオフ</th></tr>
+<tr>
+<td>1</td>
+<td><strong>分布メトリクス</strong>（毎回実行）</td>
+<td><code>scripts/eval-target-similarity.mjs</code> 新設。生成 live とターゲット台本の両方から (a)行長分布の分散（実物は1語行と300字一気話が混在、LLMは中庸に収束する） (b)フィラー率（なんか/えー/まあ/いや per 100字） (c)問いかけ率 (d)固有名詞密度 (e)語彙多様性 を算出して並記。Phase 1 の10本選定スコアへ加点統合</td>
+<td><code>scripts/</code>新設<br>Phase 1 選定スコア</td>
+<td>LLM不要・数秒・客観・毎回回せる。表面統計なので「意味の自然さ」は測れない</td>
+</tr>
+<tr>
+<td>2</td>
+<td><strong>LLM審査員ペア比較</strong>（月次ベンチ）</td>
+<td>生成ブロックとターゲット台本ブロックをシャッフルして提示し「どちらが実配信の文字起こしか」を判定させる。誤答率=品質（50%に近いほど見分けがつかない）。月1回の回帰検知として固定セットで実行</td>
+<td>ベンチスクリプト新設<br>（強いモデルで実行）</td>
+<td>総合品質が1つの数字になる。コストがかかる・審査員モデルのバイアスあり</td>
+</tr>
+<tr>
+<td>3</td>
+<td><strong>self-eval自動化</strong>（Phase 1統合）</td>
+<td>生成完了フックで既存の <code>eval_depth〜eval_repetition</code> をLLM評価で自動記入（現状全NULL）。ダッシュボードに推移グラフ表示</td>
+<td><code>generate.mjs</code>完了フック<br><code>server.js</code> /api/live/eval<br>UI</td>
+<td>既存カラムが生きる。自己評価は甘くなりがちで、ターゲット比較にはならない</td>
+</tr>
+</table>
+<p class="note">推奨: <strong>案1を最初に</strong>（無料で毎回回る舵取り装置）。案2は月次ベンチ、案3は Phase 1 実装時に同梱。</p>
+
+<p><strong>D-4 実装詳細</strong></p>
+<p>メトリクス定義（<code>scripts/eval-target-similarity.mjs</code>。全てLLM不要・正規表現と集計のみ）:</p>
+<table>
+<tr><th style="width:130px">指標</th><th>計算</th><th style="width:210px">なぜ効くか</th></tr>
+<tr><td>行長のばらつき</td><td>句点分割した文の文字数の変動係数（標準偏差÷平均）</td><td>実物は「まじで。」の1語文と300字の一気話が混在。LLMは中庸な長さに収束するので、ここが一番先に差が出る</td></tr>
+<tr><td>フィラー率</td><td><code>(なんか|えー|まあ|いや|ていうか|えっと|うーん)</code> の出現数 ÷ 100字</td><td>整形されすぎた台本はフィラーが少ない</td></tr>
+<tr><td>問いかけ率</td><td>「？」で終わる文 ÷ 全文数</td><td>視聴者への意識の量。C8 の効果測定を兼ねる</td></tr>
+<tr><td>固有名詞密度</td><td>カタカナ4字以上の連続 + 数字を含む語 ÷ 100字（簡易プロキシ）</td><td>具体性の代理指標。断片記憶化（データ整備）の効果測定を兼ねる</td></tr>
+<tr><td>語彙多様性</td><td>文字2-gramの異なり数 ÷ 延べ数（形態素解析は使わない）</td><td>同じ言い回しの繰り返し検知。eval_repetition の機械版</td></tr>
+</table>
+
+<p>運用手順:</p>
+<ul class="check">
+  <li class="todo">① assets/vtuber台本 12本で実測し、<strong>基準値と許容帯（±20%）をスクリプト内に定数化</strong>（例: 行長CV: 目標 0.8〜1.2 のような形で。実測してから確定する）</li>
+  <li class="todo">② 生成 live ごとに同メトリクスを算出し、基準との乖離を色付きで並記表示</li>
+  <li class="todo">③ Phase 1 の10本選定スコアに「乖離の合計」を減点項目として統合</li>
+  <li class="todo">④ 改善作業（A/C/D）の前後で必ず1回実行し、docs か log に記録を残す</li>
+</ul>
+
+<p>案2: LLM審査員プロンプト（月次・固定20ペアで実行）:</p>
+<pre><code>以下の2つのテキストは、片方が実在VTuber配信の文字起こし、もう片方がAI生成の配信台本。
+どちらが実在の文字起こしかを A / B で答え、根拠を1文で述べる。
+
+A: {{textA}}
+B: {{textB}}
+
+出力: {"answer": "A|B", "reason": "…"}</code></pre>
+<p class="note">誤答率50%=見分けがつかない状態が理論上の上限。開始時はおそらく誤答率0〜5%（=一瞬でバレる）なので、<strong>30%到達を当面のゴール</strong>にする。ペアは毎回同じ20組を使い回して経時比較できるようにする（ターゲット側は台本から400字前後を無作為抽出して固定）。</p>
+
+<h3>Phase D の組み込み順</h3>
+<div class="arch-box">
+<pre style="margin:0;border:none;background:transparent;padding:0"><code>A1〜A3 (つなぎ込み)
+   + D-2案1 (独り言スタイル) + D-4案1 (分布メトリクス)   ← 軽いのでAと並行
+    ↓
+B6 (memory使用履歴) + D-1案2 (前回配信参照)
+    ↓
+C7〜C9 (番組構成)
+    ↓
+D-1案1 (canonテーブル) + D-3案1+3 (TTS表現)   ← 「生きてる感」の本丸
+    ↓
+D-2案2 (リアルコメント割り込み)   ← コメントが付き始めたら最優先へ昇格</code></pre>
+</div>
+
+<p class="note">工数目安: D-1案2=半日 / D-1案1=2〜3日 / D-2案1=1時間 / D-2案2=3〜5日 / D-3案1=1日（参照音声の準備は別途）/ D-3案3=1日 / D-4案1=半日。<strong>D-2案1 と D-4案1 は今日入れられる</strong>。</p>
+
+<h3>Phase D の完了条件</h3>
+<table>
+<tr><th>完了条件</th><th>測り方</th></tr>
+<tr><td>3配信連続で「前回の続き」への言及が自然に入る</td><td>台本目視 + <code>canon.last_mentioned_at</code> の更新履歴</td></tr>
+<tr><td>存在しないコメントを読む演出が0件</td><td>inspector 検出（「コメントで〜って」パターンの検知を追加）</td></tr>
+<tr><td>emotion 別に音声の違いが聴き分けられる</td><td>同一文を7 emotion で合成して聴き比べ</td></tr>
+<tr><td>分布メトリクス5指標中3つ以上がターゲット±20%帯に入る</td><td><code>eval-target-similarity.mjs</code></td></tr>
+<tr><td>LLM審査員の誤答率30%以上</td><td>月次ベンチ（固定20ペア。開始時はおそらく0〜5%）</td></tr>
+</table>
+
+<h3>やらないこと（Phase D の境界）</h3>
+<ul class="check">
+  <li class="todo">実在VTuber・実在人物を想起させる canon キャラ（名前・設定の類似も避ける）</li>
+  <li class="todo">シードコメントの自作自演（エンゲージメント偽装は YouTube 規約リスク。過疎対策は独り言スタイルで受ける）</li>
+  <li class="todo">コメントの全文復唱・個人情報の読み上げ</li>
+  <li class="todo">感情演技の過剰化（ref の感情差は「言われれば分かる」程度で止める。やりすぎは不気味の谷）</li>
+  <li class="todo">生成台本による canon state の自動書き換え（幻覚が世界設定に混入する。更新は当面手動）</li>
 </ul>
 
 <!-- ───────────── Phase 0 ───────────── -->
@@ -104,7 +709,7 @@
   <li class="done">怪談 raw text を長く渡しすぎない (2000字→900字)</li>
   <li class="done"><code>prompt.mjs</code> で <code>思い出:</code> → <code>【内部素材】</code> に変更</li>
   <li class="done">禁止ルールにラベル名一覧を追加</li>
-  <li class="todo">初Liveモードの禁止語追加 (おかえり, 今日も, etc.)</li>
+  <li class="done">初Liveモードの禁止語追加 → 不要化（初Live実施済み。以後は D-1案2 / E-1 の前回参照で整合）</li>
 </ul>
 
 <table>
@@ -116,8 +721,9 @@
 </table>
 
 <!-- ───────────── Phase 1 ───────────── -->
-<h2><span class="phase-badge badge-future">TODO</span> Phase 1: 10本生成→1本選定システム</h2>
+<h2><span class="phase-badge badge-future">縮小</span> Phase 1: 10本生成→1本選定システム</h2>
 <p>毎日10本作るなら、自動評価が必須。全部人間が見るのは無理。</p>
+<p class="note">2026-07-02 引き直し: <strong>縮小</strong>。独自の8種スコア体系は作らず、評価の実体は <a href="#phase-d">D-4案1</a> の分布メトリクス + 既存 inspector 検査で代替する。生成数も10本ではなく<strong>3本生成→メトリクス選定</strong>から始める（ローカルLLMで10本は生成時間が非現実的）。着手は単発生成の品質が安定してから（Step 4）。以下はフル版の設計参照用。</p>
 
 <h3>評価スコア体系</h3>
 <pre><code>quality_score
@@ -145,8 +751,9 @@
 <pre><code>10本生成 → 自動評価 → 上位3本だけ表示 → ChatGPT/人間が最終確認 → 採用1本を配信用queueへ変換</code></pre>
 
 <!-- ───────────── Phase 2 ───────────── -->
-<h2><span class="phase-badge badge-future">TODO</span> Phase 2: 怪談DBの整理</h2>
+<h2><span class="phase-badge badge-future">lite化</span> Phase 2: 怪談DBの整理</h2>
 <p>怪談 raw text をそのまま渡さず、<code>stream_card</code> に変換する。</p>
+<p class="note">2026-07-02 引き直し: <strong>lite版に縮小</strong>。フル9フィールドではなく <code>key_points / stream_angle / return_hooks / used_count / last_used_at</code> の5つだけで開始し、データ整備の蒸留バッチ（強いモデル）に同梱して生成する。<code>risk_level</code> 等は運用で問題が出てから足す。実施は Step 3。</p>
 
 <h3>stream_card 形式</h3>
 <pre><code>{
@@ -190,8 +797,9 @@
 </ul>
 
 <!-- ───────────── Phase 3 ───────────── -->
-<h2><span class="phase-badge badge-future">TODO</span> Phase 3: memory / topic / style / flow の再整理</h2>
+<h2><span class="phase-badge badge-done">吸収済み</span> Phase 3: memory / topic / style / flow の再整理</h2>
 <p>設計の中核。素材レイヤーの再定義。</p>
+<p class="note">2026-07-02 引き直し: <strong>独立フェーズとしては廃止（各所に吸収済み）</strong>。topic_pattern = A1（topic_hint接続）、style_moves = A3（蒸留カードfew-shot）、flow profile = C7（番組構成）、memory atoms = データ整備の断片記憶プロンプト（objects/actions/micro_conflicts/odd_detail/unclear）で全て代替した。以下は設計の参照用として残す。</p>
 
 <h3>memory DB — 具体記憶の唯一の出所</h3>
 <pre><code>{
@@ -263,6 +871,7 @@
 <!-- ───────────── Phase 4 ───────────── -->
 <h2><span class="phase-badge badge-active">ACTIVE</span> Phase 4: 配信用queueとランタイム</h2>
 <p>生成CSVをそのまま配信に流すのは危ない。中間形式が必要。</p>
+<p class="note">2026-07-02 引き直し: <strong>broadcast queue という別形式は作らない</strong>。C7 の speech_lines カラム追加（section / topic_title / emotion）で下のJSONの役割を賄い、radio.js が speech_lines を直接読む。<code>can_interrupt_after</code> は D-2案2 実装時に同じくカラムで追加。下のJSONはフィールド設計の参照用。</p>
 
 <h3>broadcast queue 項目</h3>
 <pre><code>{
@@ -284,26 +893,27 @@
   <li class="done">TTS queue (<code>app/onair/radio.js</code>)</li>
   <li class="done">字幕表示 (<code>SubtitleOverlay</code>)</li>
   <li class="done">キャラ表示 (<code>ClipAvatar</code>)</li>
-  <li class="todo">待機画面</li>
-  <li class="todo">本編画面</li>
-  <li class="todo">ED画面</li>
-  <li class="todo">OBS制御 (接続済み、シーン切替は手動)</li>
+  <li class="done">待機画面 (?obs モードの opening.mp4)</li>
+  <li class="done">本編画面 (?obs モード: 背景動画 + ClipAvatar + モーション/口パク同期)</li>
+  <li class="todo">ED画面 (?obs の opacity 切替に ending レイヤーを1枚足すだけ)</li>
+  <li class="done">OBSシーン制御 → 不要化 (Browser Source 1枚 + opacity 自動切替で代替)</li>
   <li class="todo">エラー時のつなぎ台詞</li>
   <li class="done">手動停止ボタン</li>
 </ul>
 
 <table>
 <tr><th>完了条件</th><th>状態</th></tr>
-<tr><td>コメントなしで30分配信が通る</td><td style="color:var(--yellow)">⚠ TTS/字幕はOK、画面遷移が未完</td></tr>
+<tr><td>コメントなしで30分配信が通る</td><td style="color:var(--yellow)">⚠ ED画面とエラー時つなぎが残り</td></tr>
 <tr><td>TTSが止まらない</td><td style="color:var(--green)">✅</td></tr>
 <tr><td>字幕が出る</td><td style="color:var(--green)">✅</td></tr>
-<tr><td>待機→本編→EDが切り替わる</td><td style="color:var(--red)">❌ 未実装</td></tr>
+<tr><td>待機→本編→EDが切り替わる</td><td style="color:var(--yellow)">⚠ 待機→本編は完了 (?obs)、EDのみ未実装</td></tr>
 <tr><td>途中エラー時に止まらない</td><td style="color:var(--yellow)">⚠ 部分的</td></tr>
 </table>
 
 <!-- ───────────── Phase 5 ───────────── -->
-<h2><span class="phase-badge badge-future">TODO</span> Phase 5: コメント返し</h2>
+<h2><span class="phase-badge badge-future">D-2へ統合</span> Phase 5: コメント返し</h2>
 <p>コメント返しは最後でいい。最初から自由会話させると崩れる。</p>
+<p class="note">2026-07-02 引き直し: <strong>D-2 に統合</strong>。「最後でいい」を撤回し、初コメントが付き始めた時点で <a href="#phase-d">D-2案2</a>（割り込みミニマム版）を全てに優先して前倒す。下の OK/NG ポイント表と安全処理は D-2案2 実装時の仕様としてそのまま流用する。</p>
 
 <h3>最初の実装</h3>
 <ul class="check">
@@ -333,7 +943,8 @@
 </ul>
 
 <!-- ───────────── Phase 6 ───────────── -->
-<h2><span class="phase-badge badge-future">TODO</span> Phase 6: 自動運用・改善ループ</h2>
+<h2><span class="phase-badge badge-future">Eへ統合</span> Phase 6: 自動運用・改善ループ</h2>
+<p class="note">2026-07-04 引き直し: <strong>Phase E に統合</strong>。下の日次ループは Phase E が「経験システム込み」で具体化する。独立フェーズとしては残さない（参照用に残置）。</p>
 
 <pre><code>朝/昼:                           夕方:
   memory追加                       自動評価
@@ -346,38 +957,176 @@
   TTS/字幕/画面セット               良かった表現をstyle/memoryへ戻す
   配信                             悪かった箇所をNGルールへ追加</code></pre>
 
-<!-- ───────────── 依存関係 ───────────── -->
-<h2>依存関係と優先順位</h2>
+<!-- ───────────── Phase E: 経験を積む配信者 ───────────── -->
+<h2 id="phase-e"><span class="phase-badge badge-future">最終段階</span> Phase E: 経験を積む配信者 — 学習し続けるZIPちゃん</h2>
+<p>Phase A〜D で「今日の配信が生きてる」状態を作る。Phase E はその先、<strong>日々の配信・コメント・外的要因（仮想イベント / ニュース / トレンド / 季節）から経験値を積み上げ、配信するほど人間らしく・面白くなるループ</strong>を作る。Phase 6（自動運用）はここに統合。</p>
 
 <div class="arch-box">
-<pre style="margin:0;border:none;background:transparent;padding:0"><code>句読点/漏れ修正 ✅
-    ↓
-怪談DB stream_card化
-    ↓
-memory atoms化
-    ↓
-10本自動評価
-    ↓
-broadcast queue
-    ↓
-コメントなし初Live
-    ↓
-コメント返し
-    ↓
-flow/style再整理</code></pre>
+<p style="margin:0 0 8px;font-size:13px;"><strong>バズの構造</strong>: バズは配信単体では起きない。(a) 切り抜き導線（発見される） (b) 成長物語（追いかける理由） (c) 常連コミュニティ（帰ってくる理由）の複利。内側の経験ループが (b)(c) を作り、外側の切り抜きループが (a) を作る。</p>
+<pre style="margin:0;border:none;background:transparent;padding:0"><code>【外側: 集客ループ】                      【内側: 経験ループ】
+配信 → 切り抜き/ショート → 流入          外部入力(季節/ニュース/仮想イベント)
+  ↑                          ↓              → 今日の出来事決定 (E-2)
+  └──── コメント増 ←─────────┘              → memory/canon 更新（承認ゲート）
+              ↓                              → 台本生成 → 配信
+        反応学習 (E-4) ──────────────────→ 自己経験化 (E-1) → 翌日へ ↺</code></pre>
 </div>
 
-<h3>最短ロードマップ</h3>
+<h3>E-1: 自己経験化（配信の記憶）</h3>
+<p>配信終了後にその日の speech_lines から「今日話したこと・触れた canon」を抽出し、<strong>本人の記憶として書き戻す</strong>。「昨日話した◯◯ね」が本物になる（D-1案2 の恒久版）。</p>
+<pre><code>scripts/experience-writeback.mjs（配信後バッチ）:
+1. spoken_at が入った speech_lines を section/topic_title 単位で要約
+2. 断片記憶プロンプトに渡して memory 化 (source='self_stream', happened_at=配信日)
+3. canon に触れた台本内容から state 更新候補を生成 → 承認キューへ
+4. 「言いかけて終わった話」を unfinished として抽出 → 翌日の OP 候補（E-1 が D-1案2 を包含）</code></pre>
+
+<h3>E-2: 人生シミュレータ（仮想イベント生成）</h3>
+<p>毎朝「今日ZIPちゃんに起きたこと」を1〜3件生成し、断片記憶プロンプトの種として memory 化 + canon の arc を進める。<strong>手動ネタ出し（データ整備手順）の後継</strong>。</p>
+<pre><code>scripts/life-sim.mjs（日次バッチ・承認制から開始）:
+入力: canon 全件 + 季節カレンダー(E-3案3) + 直近7日の memory（重複回避）
+生成の重み: 日常の小事 60% / arc進行 20% / 人間関係(canon person) 10% / 身体・天気 10%
+制約: 事件にしない（断片記憶プロンプトの制約を継承）/ canon と矛盾しない /
+      週の中で category が偏らない / arc は1日1個まで進める
+出力: ネタの種 1〜3行 → 断片記憶プロンプト → 承認キュー → memory + canon.state 更新</code></pre>
+<p class="note">D-1 の「canon.state 更新は手動」の制約は、E-2 の<strong>承認キュー経由</strong>という形で引き継ぐ（自動書き込みは却下率が下がってから）。</p>
+
+<h3>E-3: 外部トレンド取り込み（ニュース・トレンド・季節）</h3>
 <table>
-<tr><th>順序</th><th>タスク</th><th>状態</th></tr>
-<tr><td>1</td><td>生成バグ修正 (parser, kaidan, inspector)</td><td style="color:var(--green)">✅ 完了</td></tr>
-<tr><td>2</td><td>怪談DBの stream_card 化</td><td>⬜</td></tr>
-<tr><td>3</td><td>10本から選ぶ自動評価</td><td>⬜</td></tr>
-<tr><td>4</td><td>配信用 queue 作成</td><td>⬜</td></tr>
-<tr><td>5</td><td>コメントなしで初Live</td><td>⬜</td></tr>
-<tr><td>6</td><td>memory atoms 追加</td><td>⬜</td></tr>
-<tr><td>7</td><td>topic / style / flow 整理</td><td>⬜</td></tr>
-<tr><td>8</td><td>コメント返し</td><td>⬜</td></tr>
+<tr><th style="width:28px">案</th><th style="width:160px">具体案</th><th>内容</th><th style="width:180px">向き・トレードオフ</th></tr>
+<tr>
+<td>1</td>
+<td><strong>RSS + LLMフィルタ</strong></td>
+<td>NHK/ITmedia 等の RSS + Google Trends daily を日次取得 → LLM で「話せるか」分類して news_card 化: <code>{title, one_line, zip_angle(ZIPちゃんがどう絡むか), expires_at}</code>。政治・宗教・事件事故・炎上は除外、エンタメ/ゲーム/食/季節/雑学のみ。台本では flow の近況セクションに「今日見たニュース」枠を1つ。<strong>one_line 以上の詳細は語らせない</strong>（怪談 stream_card と同じ幻覚ガード）</td>
+<td>鮮度のある「今の話」ができる。フィルタ精度の運用が必要</td>
+</tr>
+<tr>
+<td>2</td>
+<td><strong>Xトレンド</strong></td>
+<td>X API は有料化済みでコスパが悪い。Google Trends で代替し、X は「面白いのを見かけたら手動で種として投入」に留める</td>
+<td>API契約はしない（明確に非推奨）</td>
+</tr>
+<tr>
+<td>3</td>
+<td><strong>季節カレンダー（静的）</strong></td>
+<td>祝日・季節行事・注目ゲーム発売日を <code>data/calendar.json</code> に事前記入。API 不要で確実。E-2 のイベント生成の入力を兼ねる</td>
+<td>今すぐ作れて外部依存ゼロ。鮮度はないが「季節の話」は雑談の定番</td>
+</tr>
+</table>
+<p class="note">推奨: <strong>案3（静的・今すぐ）→ 案1（日次RSS）</strong>。案2はやらない。</p>
+
+<h3>E-4: 反応学習（ウケの還流）</h3>
+<p>C7 の section/topic_title 単位で「何がウケたか」を計測し、3箇所へ還流する。<strong>同接が少ない間はコメント1件を強いシグナルとして扱う</strong>（データが薄い前提の設計）。</p>
+<table>
+<tr><th style="width:150px">還流先</th><th>方法</th></tr>
+<tr><td>① ネタ選定の重み</td><td>memory に <code>response_score</code> カラム追加。コメントが付いたトピックの category / canon を planner で加点。翌週の台本に「ウケた系統」が増える</td></tr>
+<tr><td>② style 還流</td><td>コメントが付いた直前の言い回しを style カード候補として自動抽出 → <strong>月次で人間が選別</strong>してから DB 追加（自動追加はしない）</td></tr>
+<tr><td>③ 常連記憶</td><td><code>viewer</code> テーブル新設: <code>{handle, first_seen, last_seen, comment_count, topic_tags}</code>。「◯◯さん、いつものプリンの人だ」が言える。<strong>保存はハンドル名と話題タグのみ</strong>（コメント全文の長期保存はしない）</td></tr>
+</table>
+
+<h3>E-5: 成長の可視化（バズ要素としての成長）</h3>
+<ul class="check">
+  <li class="todo">配信回数・記念回・「初めてできた」を canon (kind: milestone) に記録し、台本で自己言及（「この配信も30回目らしい。びっくりだね」）</li>
+  <li class="todo">canon.mention_count から「よく話す話題ランキング」を自己ネタ化（「私プリンの話しすぎらしい」）— 統計がそのまま人格ネタになる</li>
+  <li class="todo">外側ループ接続: 配信後に「切り抜きどころ」を自動抽出（コメント密度 + LLM判定）して<strong>既存のショートパイプラインへ渡す</strong> → 切り抜き→流入→コメント増→ E-4 の学習が加速</li>
+</ul>
+
+<h3>安全ゲート（Phase E 共通）</h3>
+<ul class="check">
+  <li class="todo">全ての自動書き込み（memory / canon / news_card）は<strong>承認キュー経由から開始</strong>。ダッシュボードに「今日の経験（承認待ち）」パネルを追加</li>
+  <li class="todo">自動化解禁の基準: 承認キューの却下率が2週連続 20% 未満になったソースから順に</li>
+  <li class="todo">経験の総量制限: memory 追加は日次 max 5件。古く response_score の低い memory は retired（無限に増やすと検索が濁る）</li>
+  <li class="todo">実在視聴者: ハンドル名のみ・ネガティブな記憶は作らない・晒し/いじりはしない</li>
+  <li class="todo">ニュース: news_card の範囲外を語らない。訂正報道が出たら expires</li>
+  <li class="todo">ファインチューニングによる「学習」はやらない（経験= データループで実現。FT は memory が数千件を超えプロンプト注入で個性が出なくなってからの最終手段）</li>
+</ul>
+
+<h3>段階導入順と完了条件</h3>
+<div class="arch-box">
+<pre style="margin:0;border:none;background:transparent;padding:0"><code>E-0 前提カラム: C7 の section/topic_title + B6 の source/happened_at   ← Step 1〜2 で先取り済み
+    ↓
+E-1 自己経験化 → E-3案3 季節カレンダー → E-2 人生シミュレータ(承認制)
+    ↓
+E-4 反応学習 → E-3案1 ニュースRSS → E-5 成長可視化
+    ↓
+承認ゲートの段階解除（却下率基準を満たしたソースから）</code></pre>
+</div>
+<table>
+<tr><th>完了条件</th><th>測り方</th></tr>
+<tr><td>手動ネタ出しゼロで1週間、毎日新しい経験が memory に入る</td><td>memory.source 別の日次件数</td></tr>
+<tr><td>「昨日/先週話したこと」への言及が実際の過去配信と一致する</td><td>台本の言及 vs speech_lines 履歴の突合</td></tr>
+<tr><td>ウケた系統のネタが翌週の台本で実際に増える</td><td>response_score 上位 category の出現率推移</td></tr>
+<tr><td>常連の呼びかけが自然に入る（存在しない常連は呼ばない）</td><td>viewer テーブルとの突合</td></tr>
+<tr><td>承認キュー却下率 20% 未満が2週連続 → 自動化解禁</td><td>承認ログ</td></tr>
+</table>
+
+<!-- ───────────── 依存関係 ───────────── -->
+<h2>依存関係と優先順位（2026-07-02 引き直し）</h2>
+<p>Phase D 追加に伴い全体を引き直した。方針: <strong>効果 ÷ 変更量 が大きい順</strong>。別形式・別システムの新設は避け、既存テーブル・既存スクリプトの拡張だけで進める。</p>
+
+<div class="arch-box">
+<pre style="margin:0;border:none;background:transparent;padding:0"><code>Step 0 (今日〜数日 / 全部小粒。効果測定の土台もここで作る)
+  A1 topic_pattern接続 + A2 episode_v2 + A3 style few-shot   (数行〜数十行×3)
+  D-2案1 独り言スタイル                                       (1時間)
+  D-4案1 分布メトリクス + ターゲット基準値の実測              (半日) ← 以後の全変更をこれで測る
+    ↓
+Step 1 (今週 / 連続性と音の底上げ)
+  B6   memory使用履歴 + 分類カラム                            (半日)
+  D-1案2 前回配信参照                                         (半日)
+  D-3案3 文単位の緩急+間                                      (1日。台本と独立なので並行可)
+    ↓
+Step 2 (来週〜 / 構成の本丸)
+  C7   flow番組構成 + speech_lines に section/topic_title/emotion 追加
+       （broadcast queue の代替もこのカラム追加で完了）
+  C8   語りかけ(自答形) / C9 トーン再配分
+  D-3案1 emotion→参照音声                                     (1日 + 参照音声4本の準備)
+    ↓
+Step 3 (その後 / 生きてる感と素材の質)
+  D-1案1 canonテーブル (初期8件)
+  怪談 stream_card lite (データ整備の蒸留バッチに同梱)
+  memory 既存455件のバッチ書き直し (断片記憶化 + episode_v2補完 + 新カラム)
+    ↓
+Step 4 (状況トリガー / 常設タスクにしない)
+  D-2案2 リアルコメント割り込み      ← 初コメントが付いたら全てに優先して前倒し
+  B4/B5  vector-db再蒸留             ← 新規台本追加時に新パイプラインで。既存分は劣化が数値で見えたら
+  3本生成→メトリクス選定 (Phase 1縮小版) ← 単発生成の品質が安定してから
+  TTS辞書/読み調整                   ← 読み間違いが実際に目立ったら
+    ↓
+Step 5 (最終段階 / Phase E: 経験を積む配信者)
+  E-0 前提カラム (C7 の section / B6 の source・happened_at) ← Step 1〜2 で先取り済み
+  E-1 自己経験化 → E-3案3 季節カレンダー → E-2 人生シミュレータ(承認制)
+  → E-4 反応学習 → E-3案1 ニュースRSS → E-5 成長可視化 → 承認ゲート段階解除</code></pre>
+</div>
+
+<h3>最短ロードマップ（テーブル版）</h3>
+<table>
+<tr><th style="width:44px">順序</th><th>タスク</th><th style="width:120px">変更量</th><th style="width:110px">状態</th></tr>
+<tr><td>1</td><td>生成バグ修正 (parser, kaidan, inspector)</td><td>—</td><td style="color:var(--green)">✅ 完了</td></tr>
+<tr><td>2</td><td>A1+A2+A3 ベクトルDBつなぎ込み</td><td>数行〜数十行×3</td><td>⬜</td></tr>
+<tr><td>3</td><td>D-2案1 独り言スタイル + D-4案1 分布メトリクス</td><td>1時間 + 半日</td><td>⬜</td></tr>
+<tr><td>4</td><td>B6 memory使用履歴 + D-1案2 前回配信参照</td><td>半日 × 2</td><td>⬜</td></tr>
+<tr><td>5</td><td>D-3案3 文単位の緩急+間</td><td>1日</td><td>⬜</td></tr>
+<tr><td>6</td><td>C7〜C9 番組構成 + speech_linesカラム追加</td><td>2〜3日</td><td>⬜</td></tr>
+<tr><td>7</td><td>D-3案1 emotion→参照音声</td><td>1日 + 素材</td><td>⬜</td></tr>
+<tr><td>8</td><td>D-1案1 canonテーブル (初期8件)</td><td>2〜3日</td><td>⬜</td></tr>
+<tr><td>9</td><td>怪談card lite + memory455件書き直し</td><td>バッチ実行</td><td>⬜</td></tr>
+<tr><td>10</td><td>D-2案2 リアルコメント割り込み</td><td>3〜5日</td><td>状況トリガー</td></tr>
+<tr><td>11</td><td>Phase E 段階導入（E-1 → E-3案3 → E-2 → E-4 → E-3案1 → E-5）</td><td>各1〜3日</td><td>Step 3 完了後</td></tr>
+</table>
+
+<h3>この引き直しで削った・縮小したもの</h3>
+<table>
+<tr><th style="width:210px">項目</th><th style="width:110px">判断</th><th>理由</th></tr>
+<tr><td>Phase 3（素材再整理）</td><td><strong>廃止（吸収）</strong></td><td>topic_pattern=A1 / style_moves=A3 / flow=C7 / memory atoms=断片記憶プロンプトで全て代替済み。独立フェーズとして残す意味がない</td></tr>
+<tr><td>broadcast queue 中間形式</td><td><strong>作らない</strong></td><td>speech_lines へのカラム追加（section/topic_title/emotion）で足りる。形式変換層は保守コストだけ増える</td></tr>
+<tr><td>Phase 1 の8種スコア体系</td><td><strong>縮小</strong></td><td>D-4案1 の5指標 + 既存 inspector で代替。10本生成→3本生成（ローカルLLMで10本は時間が非現実的）</td></tr>
+<tr><td>Phase 5（コメント返し独立フェーズ）</td><td><strong>D-2へ統合</strong></td><td>「最後でいい」を撤回。方針は D-2、詳細仕様（OK/NGポイント・安全処理）は Phase 5 の表を流用</td></tr>
+<tr><td>怪談 stream_card フル9フィールド</td><td><strong>lite化</strong></td><td>key_points / stream_angle / return_hooks / used_count / last_used_at の5つで開始。risk_level 等は問題が出てから</td></tr>
+<tr><td>OBSシーン制御</td><td><strong>不要化</strong></td><td>?obs モード（Browser Source 1枚 + opacity切替）で待機⇔本編の遷移が済んだ。EDも同方式で作る</td></tr>
+<tr><td>C8 の inspector 問いかけ検出</td><td><strong>後回し</strong></td><td>D-4案1 の問いかけ率メトリクスが同じ役割を果たす。専用検査は数値で問題が続いた場合のみ</td></tr>
+<tr><td>B5 の全面スキーマ統一</td><td><strong>新規分のみ適用</strong></td><td>既存DBの一括変換はやらない。新規追加カード（データ整備手順）から新スキーマを適用し、既存は再蒸留のタイミングで自然置換</td></tr>
+<tr><td>Phase 6（自動運用）</td><td><strong>Eへ統合</strong></td><td><a href="#phase-e">Phase E</a> が日次ループを経験システム込みで具体化。独立フェーズとして残さない</td></tr>
+<tr><td>初Live/通常Liveモード（課題13）</td><td><strong>不要化</strong></td><td>初Liveは実施済み。以後は D-1案2 / E-1 の前回参照で「今日も」系の整合が取れる</td></tr>
+<tr><td>TTS辞書/読み調整（課題12）</td><td><strong>状況トリガー</strong></td><td>読み間違いが実際に目立ったら Step 4 で対応。事前整備はしない</td></tr>
+<tr><td>Xトレンド API 契約</td><td><strong>やらない</strong></td><td>有料化済みでコスパが悪い。Google Trends RSS + 手動投入（E-3案2）で代替</td></tr>
 </table>
 
 <!-- ───────────── インフラ改善（実施済み） ───────────── -->
@@ -401,13 +1150,15 @@ flow/style再整理</code></pre>
 <h2>結論</h2>
 <div class="arch-box">
 <p style="margin:0;font-size:13px;">
-<strong>台本を作る機能は育ってきた。でも、素材管理・選定・配信実行の土台がまだ弱い。</strong><br><br>
-次にやるべきは生成モデルをいじることではなく、<strong>DB整理 + 評価 + 配信queue</strong> を作ること。<br><br>
-特に重要な3つ:<br>
-&nbsp;&nbsp;1. 怪談DBを stream_card 化する<br>
-&nbsp;&nbsp;2. memoryを atoms 化する<br>
-&nbsp;&nbsp;3. 10本から選ぶ自動評価を作る<br><br>
-ここができると、毎日1本の安定配信にかなり近づく。
+<strong>台本を作る機能は育ってきた。次は「つなぎ込み」と「生きてる感」。新しい仕組みはもう増やさない。</strong><br><br>
+queue・独自スコア体系・全面スキーマ統一のような「新しい形式づくり」は全て既存テーブルの拡張に縮小した（詳細は「依存関係と優先順位」の削減表）。<br><br>
+今日入れられる3つ（Step 0）:<br>
+&nbsp;&nbsp;1. A1〜A3: ベクトルDBをプロンプトに実際に届かせる<br>
+&nbsp;&nbsp;2. D-2案1: 存在しないコメントを読む演出をやめ、独り言スタイルに統一する<br>
+&nbsp;&nbsp;3. D-4案1: ターゲット台本との分布メトリクスを基準値ごと用意する（以後の舵取り装置）<br><br>
+その後は C7（番組構成）→ D-1 / D-3（canonと音声表現）が本丸。<br>
+初コメントが付いたら D-2案2（リアルコメント割り込み）を全てに優先して前倒す。<br><br>
+最終形は <a href="#phase-e">Phase E（経験を積む配信者）</a>: 配信・コメント・外的要因から日々 memory / canon が育ち、配信するほど人間らしくなるループ。バズは (a)切り抜き導線 × (b)成長物語 × (c)常連コミュニティ の複利で作る。
 </p>
 </div>
 

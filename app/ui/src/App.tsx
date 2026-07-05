@@ -124,7 +124,7 @@ export default function App() {
       }
     }).catch(() => {});
     poll();
-    const id = window.setInterval(poll, obsMode ? 500 : 2000);
+    const id = window.setInterval(poll, obsMode ? 250 : 2000);
     return () => window.clearInterval(id);
   }, [addConsoleLog, loadLives, loadSpeechLines, selectedLiveId, obsMode]);
 
